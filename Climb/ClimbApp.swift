@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct ClimbApp: App {
@@ -13,5 +14,18 @@ struct ClimbApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: [
+            LinkedAccount.self,
+            Match.self,
+            LeagueStats.self,
+            TFTStats.self,
+            ValorantStats.self,
+            CoachConversation.self,
+            ChatMessage.self,
+            MatchParticipantSummary.self,
+            TeamStats.self,
+            OpponentEncounter.self,
+            GoldTimelinePoint.self
+        ])
     }
 }

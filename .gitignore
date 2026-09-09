@@ -1,0 +1,11 @@
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.build/
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+# Secrets (real API keys — never commit)
+Climb/Secrets.swift
