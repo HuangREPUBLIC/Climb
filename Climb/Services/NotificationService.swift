@@ -20,6 +20,12 @@ enum NotificationService {
     ) {
         guard newMatchCount > 0 else { return }
 
+        // Asked here, in context, rather than at app launch: this is the first
+        // moment the player has actually done something a reminder would be
+        // about, so the system prompt lands next to a reason instead of a cold
+        // "Climb Would Like to Send You Notifications" on first open.
+        requestAuthorizationIfNeeded()
+
         let content = UNMutableNotificationContent()
         content.title = newMatchCount == 1 ? "Match imported" : "\(newMatchCount) matches imported"
         // Naming the champion makes the reminder about a game the player

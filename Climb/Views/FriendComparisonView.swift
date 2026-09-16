@@ -84,6 +84,8 @@ struct FriendComparisonView: View {
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Compare with a Friend")
         .navigationBarTitleDisplayMode(.inline)
+        .sensoryFeedback(.success, trigger: hasResult) { old, new in new && !old }
+        .sensoryFeedback(.error, trigger: errorMessage) { _, new in new != nil }
     }
 
     // MARK: - Search

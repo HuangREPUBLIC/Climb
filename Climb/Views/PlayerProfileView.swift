@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// Another player's page, opening on their profile — same banner, stat cards
 /// and match rows as your own Profile tab — with paging through their full

@@ -47,6 +47,13 @@ struct TagEditor: View {
                     toggle(tag)
                 } label: {
                     TagChip(text: tag, isSelected: tags.contains(tag))
+                        // The capsule stays visually compact, but the button's
+                        // own frame — what actually gets hit-tested — is held
+                        // to Apple's 44pt minimum tap target. Below that, a
+                        // caption-sized chip with 5pt vertical padding measures
+                        // under 30pt tall, small enough to cause repeated
+                        // mis-taps against its neighbours.
+                        .frame(minHeight: 44)
                 }
                 .buttonStyle(PressableButtonStyle())
                 .accessibilityAddTraits(tags.contains(tag) ? [.isSelected] : [])
@@ -63,9 +70,14 @@ struct TagEditor: View {
                     .padding(.vertical, 5)
                     .background(Color.secondary.opacity(0.12))
                     .clipShape(Capsule())
+                    .frame(minHeight: 44)
             }
             .buttonStyle(PressableButtonStyle())
         }
+        // A quick tap-confirmation on every toggle — the chip's own colour
+        // change already shows the new state, but a selection tick makes the
+        // tap register instantly, before the eye catches up.
+        .sensoryFeedback(.selection, trigger: tags)
         .alert("Add a tag", isPresented: $isAddingCustom) {
             TextField("e.g. Bad recall timing", text: $customText)
                 .textInputAutocapitalization(.sentences)
@@ -104,6 +116,7 @@ struct TagFilterBar: View {
                         selection = selection == tag ? nil : tag
                     } label: {
                         TagChip(text: tag, isSelected: selection == tag)
+                            .frame(minHeight: 44)
                     }
                     .buttonStyle(PressableButtonStyle())
                     .accessibilityAddTraits(selection == tag ? [.isSelected] : [])

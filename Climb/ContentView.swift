@@ -52,7 +52,11 @@ struct ContentView: View {
         .task {
             NotificationRouter.shared.start()
             MockData.seedIfNeeded(context: modelContext)
-            NotificationService.requestAuthorizationIfNeeded()
+            // Notification permission is requested in context — right before the
+            // first reflection reminder is actually scheduled, in
+            // NotificationService.scheduleReflectionReminder — rather than here
+            // on cold launch, before the player has linked an account or has any
+            // reason to know what the permission is for.
             // A cold launch from a notification records the id before this view
             // exists, so the pending value is consumed here as well as on change.
             consumePendingMatch()

@@ -9,6 +9,7 @@ struct ProfileView: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.modelContext) private var modelContext
 
     @ScaledMetric(relativeTo: .title2) private var avatarSize: CGFloat = 82
     @ScaledMetric(relativeTo: .caption) private var rankIconSize: CGFloat = 26
@@ -56,6 +57,10 @@ struct ProfileView: View {
             .readableContentWidth()
         }
         .background(Color(.systemGroupedBackground))
+        // The standard system gesture for "get the latest data," so refreshing
+        // no longer requires opening the sync sheet — a swipe down is a pattern
+        // every iOS user already knows from Mail, News and the App Store.
+        .refreshable { await refresh() }
         .navigationTitle("Profile")
         // Inline centres the title and removes the large-title block that sat
         // above the banner — that gap was what made the square top edge read
@@ -80,6 +85,10 @@ struct ProfileView: View {
                 } label: {
                     Image(systemName: "person.2")
                 }
+                // An icon-only control has no visible text for VoiceOver to
+                // read, so without this it announces the SF Symbol's raw name
+                // ("person dot 2") rather than what the button does.
+                .accessibilityLabel("Compare with a friend")
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -87,11 +96,25 @@ struct ProfileView: View {
                 } label: {
                     Image(systemName: "arrow.triangle.2.circlepath")
                 }
+                .accessibilityLabel(account == nil ? "Link Riot account" : "Sync Riot account")
             }
         }
         .sheet(isPresented: $showingLinkAccount) {
             LinkAccountView()
         }
+    }
+
+    /// Backs pull-to-refresh with the same sync the Link/Sync sheet runs, using
+    /// the account's already-stored credentials and game selection.
+    private func refresh() async {
+        guard let account, let platform = RiotPlatform(rawValue: account.platform) else { return }
+        try? await MatchImportService.linkAndSync(
+            gameName: account.riotGameName,
+            tagLine: account.riotTagline,
+            platform: platform,
+            gamesToSync: Set(account.syncedGames),
+            context: modelContext
+        )
     }
 
     // MARK: - Header

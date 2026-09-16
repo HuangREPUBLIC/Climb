@@ -20,6 +20,7 @@ struct LinkAccountView: View {
     @State private var syncTFT = false
     @State private var isSyncing = false
     @State private var errorMessage: String?
+    @State private var syncSucceeded = false
 
     @FocusState private var focusedField: Field?
 
@@ -60,6 +61,11 @@ struct LinkAccountView: View {
                 }
             }
             .onAppear(perform: prefill)
+            // Confirms the outcome by touch as well as sight — useful the
+            // moment the sheet is already dismissing on success, and for a
+            // failure that a glance might miss if attention is elsewhere.
+            .sensoryFeedback(.success, trigger: syncSucceeded)
+            .sensoryFeedback(.error, trigger: errorMessage) { _, new in new != nil }
         }
     }
 
@@ -353,6 +359,7 @@ struct LinkAccountView: View {
                     context: modelContext
                 )
                 isSyncing = false
+                syncSucceeded.toggle()
                 dismiss()
             } catch {
                 isSyncing = false
