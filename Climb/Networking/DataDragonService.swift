@@ -6,23 +6,33 @@ actor DataDragonService {
     private static let fallbackVersion = "14.24.1"
 
     private var cachedVersion: String?
+    // Actors are reentrant across `await` points: dozens of ChampionIconViews
+    // can all call currentVersion() before the first fetch finishes, so
+    // without this in-flight task, each one would fire its own redundant
+    // versions.json request. Later callers await the same task instead.
+    private var versionTask: Task<String, Never>?
 
     func currentVersion() async -> String {
         if let cachedVersion { return cachedVersion }
+        if let versionTask { return await versionTask.value }
 
-        guard let url = URL(string: "https://ddragon.leagueoflegends.com/api/versions.json") else {
-            return Self.fallbackVersion
+        let task = Task<String, Never> {
+            guard let url = URL(string: "https://ddragon.leagueoflegends.com/api/versions.json") else {
+                return Self.fallbackVersion
+            }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                let versions = try JSONDecoder().decode([String].self, from: data)
+                return versions.first ?? Self.fallbackVersion
+            } catch {
+                return Self.fallbackVersion
+            }
         }
-
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let versions = try JSONDecoder().decode([String].self, from: data)
-            let version = versions.first ?? Self.fallbackVersion
-            cachedVersion = version
-            return version
-        } catch {
-            return Self.fallbackVersion
-        }
+        versionTask = task
+        let version = await task.value
+        cachedVersion = version
+        versionTask = nil
+        return version
     }
 
     func championIconURL(for championName: String) async -> URL? {
@@ -39,6 +49,9 @@ actor DataDragonService {
     /// differs from their display name (Wukong -> MonkeyKing, Bel'Veth ->
     /// Belveth, and so on) and any future additions.
     private var championIDsByLowercaseKey: [String: String] = [:]
+    // Same reentrancy issue as versionTask: without this, every concurrent
+    // icon request on first launch would each fetch the ~700KB champion.json.
+    private var championIDsTask: Task<Void, Never>?
 
     private func resolvedChampionID(for championName: String) async -> String {
         let fallback = Self.dataDragonID(for: championName)
@@ -49,22 +62,32 @@ actor DataDragonService {
     }
 
     private func loadChampionIDs() async {
-        let version = await currentVersion()
-        guard let url = URL(string: "https://ddragon.leagueoflegends.com/cdn/\(version)/data/en_US/champion.json") else { return }
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(ChampionDataResponse.self, from: data)
-            var mapping: [String: String] = [:]
-            for (id, entry) in response.data {
-                mapping[id.lowercased()] = id
-                // Also key by the stripped display name so "NunuWillump" and
-                // "Wukong" resolve to "Nunu" and "MonkeyKing".
-                mapping[Self.dataDragonID(for: entry.name).lowercased()] = id
-            }
-            championIDsByLowercaseKey = mapping
-        } catch {
-            // Leave empty; resolvedChampionID falls back to the stripped name.
+        if let championIDsTask {
+            await championIDsTask.value
+            return
         }
+
+        let task = Task<Void, Never> {
+            let version = await currentVersion()
+            guard let url = URL(string: "https://ddragon.leagueoflegends.com/cdn/\(version)/data/en_US/champion.json") else { return }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                let response = try JSONDecoder().decode(ChampionDataResponse.self, from: data)
+                var mapping: [String: String] = [:]
+                for (id, entry) in response.data {
+                    mapping[id.lowercased()] = id
+                    // Also key by the stripped display name so "NunuWillump" and
+                    // "Wukong" resolve to "Nunu" and "MonkeyKing".
+                    mapping[Self.dataDragonID(for: entry.name).lowercased()] = id
+                }
+                self.championIDsByLowercaseKey = mapping
+            } catch {
+                // Leave empty; resolvedChampionID falls back to the stripped name.
+            }
+        }
+        championIDsTask = task
+        await task.value
+        championIDsTask = nil
     }
 
     private struct ChampionDataResponse: Decodable {
