@@ -201,3 +201,23 @@ struct PressableButtonStyle: ButtonStyle {
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
+
+/// A failure message in the page body, where it can't be missed the way a
+/// footer line can.
+struct ErrorCard: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Theme.loss)
+            Text(message)
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(Theme.cardPadding)
+        .background(Theme.loss.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .cardShadow()
+    }
+}

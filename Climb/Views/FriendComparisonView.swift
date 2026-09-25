@@ -22,14 +22,13 @@ struct FriendComparisonView: View {
     @State private var friendProfile: OtherPlayerProfile?
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @FocusState private var focusedField: Field?
+    @FocusState private var focusedField: RiotIDInput.Field?
 
     @ScaledMetric(relativeTo: .title3) private var avatarSize: CGFloat = 54
     @ScaledMetric(relativeTo: .caption) private var rankIconSize: CGFloat = 20
     @ScaledMetric(relativeTo: .subheadline) private var championSize: CGFloat = 36
     @ScaledMetric(relativeTo: .caption2) private var barHeight: CGFloat = 8
 
-    private enum Field { case name, tag }
 
     private var account: LinkedAccount? { accounts.first }
     private var myLeagueMatches: [Match] { myMatches.filter { $0.leagueStats != nil } }
@@ -66,7 +65,7 @@ struct FriendComparisonView: View {
                 searchCard
 
                 if let errorMessage {
-                    errorCard(errorMessage)
+                    ErrorCard(message: errorMessage)
                 }
 
                 if hasResult {
@@ -95,87 +94,18 @@ struct FriendComparisonView: View {
             Text("Friend's Riot ID")
                 .font(.headline)
 
-            riotIDField
-
-            HStack {
-                Label("Server", systemImage: "globe")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                serverMenu
-            }
+            RiotIDInput(
+                gameName: $gameName,
+                tagLine: $tagLine,
+                platform: $platform,
+                focus: $focusedField,
+                submitLabel: .search,
+                onSubmit: { if canCompare { compare() } }
+            )
 
             compareButton
         }
         .cardSurface()
-    }
-
-    /// The two fields are drawn as one control split by a "#", because that is
-    /// how a Riot ID is written everywhere else — two separate rows labelled
-    /// "Game name" and "Tagline (without #)" made the user reassemble it.
-    @ViewBuilder
-    private var riotIDField: some View {
-        let name = TextField("Game name", text: $gameName)
-            .focused($focusedField, equals: .name)
-            .submitLabel(.next)
-            .onSubmit { focusedField = .tag }
-
-        let tag = HStack(spacing: 2) {
-            Text("#").foregroundStyle(.tertiary)
-            TextField("TAG", text: $tagLine)
-                .focused($focusedField, equals: .tag)
-                .submitLabel(.search)
-                .onSubmit { if canCompare { compare() } }
-        }
-
-        Group {
-            // Side by side reads as one identity; at accessibility sizes the
-            // tag would be squeezed to a couple of characters, so it stacks.
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
-                    name
-                    Divider()
-                    tag
-                }
-            } else {
-                HStack(spacing: 6) {
-                    name
-                    Divider().frame(height: rankIconSize)
-                    tag.frame(maxWidth: 110, alignment: .leading)
-                }
-            }
-        }
-        .font(.body)
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color(.tertiarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-    }
-
-    /// A menu rather than a `Picker` row, matching the game switcher in the
-    /// navigation bar — the app already has one capsule-shaped chooser.
-    private var serverMenu: some View {
-        Menu {
-            Picker("Server", selection: $platform) {
-                ForEach(RiotPlatform.allCases) { option in
-                    Text(option.displayName).tag(option)
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Text(platform.displayName)
-                    .font(.subheadline.weight(.semibold))
-                Image(systemName: "chevron.up.chevron.down")
-                    .scaledFont(9, weight: .semibold)
-            }
-            .foregroundStyle(Theme.accent)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Theme.accent.opacity(0.12))
-            .clipShape(Capsule())
-        }
     }
 
     private var compareButton: some View {
@@ -200,20 +130,6 @@ struct FriendComparisonView: View {
         }
         .buttonStyle(PressableButtonStyle())
         .disabled(!canCompare)
-    }
-
-    private func errorCard(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Theme.loss)
-            Text(message)
-                .font(.subheadline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(Theme.cardPadding)
-        .background(Theme.loss.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .cardShadow()
     }
 
     private var emptyState: some View {

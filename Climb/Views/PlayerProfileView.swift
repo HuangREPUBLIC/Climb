@@ -30,9 +30,6 @@ struct PlayerProfileView: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    @ScaledMetric(relativeTo: .title2) private var avatarSize: CGFloat = 76
-    @ScaledMetric(relativeTo: .caption) private var rankIconSize: CGFloat = 26
-    @ScaledMetric(relativeTo: .title3) private var summaryDividerHeight: CGFloat = 40
     @ScaledMetric(relativeTo: .subheadline) private var rawPortraitSize: CGFloat = 44
     private var portraitSize: CGFloat { rawPortraitSize.capped(at: 72) }
 
@@ -87,133 +84,19 @@ struct PlayerProfileView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 12) {
-            avatarView
-            identityBlock
-        }
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity)
-        .padding(.top, 12)
-        .padding(.bottom, 24)
-        .background { bannerBackdrop }
-        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 28, bottomTrailingRadius: 28))
-    }
-
-    @ViewBuilder
-    private var bannerBackdrop: some View {
-        ZStack {
-            if let bannerChampion, let url = DataDragonService.shared.splashArtURL(for: bannerChampion) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        accentFallback
-                    }
+        ProfileBanner(
+            profileIconID: profile?.profileIconID,
+            level: profile?.summonerLevel,
+            bannerChampion: bannerChampion
+        ) {
+            VStack(spacing: 12) {
+                BannerTitle(text: "\(riotIdGameName)#\(riotIdTagline)")
+                if let profile {
+                    RankChip(tier: profile.rankTier, division: profile.rankDivision, leaguePoints: profile.leaguePoints)
                 }
-            } else {
-                accentFallback
-            }
-
-            LinearGradient(
-                stops: [
-                    .init(color: .black.opacity(0.55), location: 0),
-                    .init(color: .black.opacity(0.28), location: 0.45),
-                    .init(color: .black.opacity(0.70), location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-    }
-
-    /// Their history loads after the view appears, so the banner has no
-    /// champion to show at first — the accent keeps it from flashing empty.
-    private var accentFallback: some View {
-        LinearGradient(
-            colors: [Theme.accent, Theme.accent.opacity(0.72)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private var avatarView: some View {
-        Group {
-            if let iconID = profile?.profileIconID {
-                ProfileIconView(profileIconID: iconID, size: avatarSize)
-            } else {
-                Circle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: avatarSize, height: avatarSize)
-                    .overlay {
-                        Image(systemName: "person.fill")
-                            .font(.title)
-                            .foregroundStyle(.white)
-                    }
             }
         }
-        .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 3))
-        .overlay(alignment: .bottom) {
-            if let level = profile?.summonerLevel {
-                Text("\(level)")
-                    .font(.caption2.weight(.bold).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(.black.opacity(0.6), in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.5), lineWidth: 1))
-                    .offset(y: 7)
-            }
-        }
-        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
     }
-
-    @ViewBuilder
-    private var identityBlock: some View {
-        VStack(spacing: 12) {
-            Text("\(riotIdGameName)#\(riotIdTagline)")
-                .font(.title2.bold())
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.5)
-                .frame(maxWidth: .infinity)
-                .shadow(color: .black.opacity(0.45), radius: 6, y: 1)
-
-            if profile != nil {
-                rankChip
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var rankChip: some View {
-        HStack(spacing: 6) {
-            if let tier = profile?.rankTier, let division = profile?.rankDivision {
-                RankIconView(tier: tier, size: rankIconSize)
-                Text(RankEmblemService.displayName(tier: tier, division: division))
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                if let lp = profile?.leaguePoints {
-                    Text("\u{00B7} \(lp) LP")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-            } else {
-                Image(systemName: "shield.lefthalf.filled")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-                Text("Unranked")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-            }
-        }
-        .lineLimit(1)
-        .minimumScaleFactor(0.7)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glassEffect()
-    }
-
 
     // MARK: - Summary
 
@@ -221,46 +104,11 @@ struct PlayerProfileView: View {
         let wins = matches.filter(\.win).count
         let winRate = matches.isEmpty ? 0 : Double(wins) / Double(matches.count) * 100
         let avgKDA = matches.isEmpty ? 0 : matches.map(kdaValue).reduce(0, +) / Double(matches.count)
-
-        let columns = [
-            statColumn(icon: "gamecontroller.fill", tint: .secondary, label: "Loaded", value: "\(matches.count)"),
-            statColumn(icon: "percent", tint: winRate >= 50 ? Theme.win : Theme.loss, label: "Win rate", value: "\(Int(winRate.rounded()))%"),
-            statColumn(icon: "bolt.fill", tint: .secondary, label: "Avg KDA", value: String(format: "%.2f", avgKDA))
-        ]
-
-        // Three columns become three rows at accessibility sizes — see
-        // ProfileView, which uses the same summary card.
-        return Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(spacing: 12) {
-                    ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                        if index > 0 { Divider() }
-                        column
-                    }
-                }
-            } else {
-                HStack(spacing: 0) {
-                    ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                        if index > 0 { Divider().frame(height: summaryDividerHeight) }
-                        column
-                    }
-                }
-            }
-        }
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .cardShadow()
-    }
-
-    private func statColumn(icon: String, tint: Color, label: String, value: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon).font(.caption).foregroundStyle(tint)
-            Text(value).font(.title3.bold()).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
+        return StatSummaryCard(stats: [
+            .init(icon: "gamecontroller.fill", label: "Loaded", value: "\(matches.count)"),
+            .init(icon: "percent", tint: winRate >= 50 ? Theme.win : Theme.loss, label: "Win rate", value: "\(Int(winRate.rounded()))%"),
+            .init(icon: "bolt.fill", label: "Avg KDA", value: String(format: "%.2f", avgKDA))
+        ])
     }
 
     private func kdaValue(_ match: OtherPlayerMatchSummary) -> Double {

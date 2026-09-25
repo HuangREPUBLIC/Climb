@@ -10,7 +10,6 @@ import SwiftData
 struct LinkAccountView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Query private var accounts: [LinkedAccount]
 
     @State private var gameName = ""
@@ -22,12 +21,10 @@ struct LinkAccountView: View {
     @State private var errorMessage: String?
     @State private var syncSucceeded = false
 
-    @FocusState private var focusedField: Field?
+    @FocusState private var focusedField: RiotIDInput.Field?
 
     @ScaledMetric(relativeTo: .title3) private var gameIconSize: CGFloat = 38
-    @ScaledMetric(relativeTo: .caption) private var fieldDividerHeight: CGFloat = 20
 
-    private enum Field { case name, tag }
 
     private var existingAccount: LinkedAccount? { accounts.first }
     private var isFirstLink: Bool { existingAccount == nil }
@@ -45,7 +42,7 @@ struct LinkAccountView: View {
                     if isFirstLink { intro }
                     identityCard
                     gamesCard
-                    if let errorMessage { errorCard(errorMessage) }
+                    if let errorMessage { ErrorCard(message: errorMessage) }
                     syncButton
                 }
                 .padding()
@@ -95,81 +92,9 @@ struct LinkAccountView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Riot ID")
                 .font(.headline)
-
-            riotIDField
-
-            HStack {
-                Label("Server", systemImage: "globe")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                serverMenu
-            }
+            RiotIDInput(gameName: $gameName, tagLine: $tagLine, platform: $platform, focus: $focusedField)
         }
         .cardSurface()
-    }
-
-    /// One control split by a "#", matching how a Riot ID is written — the two
-    /// separate rows made the player disassemble their own ID to enter it.
-    @ViewBuilder
-    private var riotIDField: some View {
-        let name = TextField("Game name", text: $gameName)
-            .focused($focusedField, equals: .name)
-            .submitLabel(.next)
-            .onSubmit { focusedField = .tag }
-
-        let tag = HStack(spacing: 2) {
-            Text("#").foregroundStyle(.tertiary)
-            TextField("TAG", text: $tagLine)
-                .focused($focusedField, equals: .tag)
-                .submitLabel(.done)
-                .onSubmit { focusedField = nil }
-        }
-
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
-                    name
-                    Divider()
-                    tag
-                }
-            } else {
-                HStack(spacing: 6) {
-                    name
-                    Divider().frame(height: fieldDividerHeight)
-                    tag.frame(maxWidth: 110, alignment: .leading)
-                }
-            }
-        }
-        .font(.body)
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color(.tertiarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-    }
-
-    private var serverMenu: some View {
-        Menu {
-            Picker("Server", selection: $platform) {
-                ForEach(RiotPlatform.allCases) { option in
-                    Text(option.displayName).tag(option)
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Text(platform.displayName)
-                    .font(.subheadline.weight(.semibold))
-                Image(systemName: "chevron.up.chevron.down")
-                    .scaledFont(9, weight: .semibold)
-            }
-            .foregroundStyle(Theme.accent)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Theme.accent.opacity(0.12))
-            .clipShape(Capsule())
-        }
     }
 
     // MARK: - Games
@@ -246,20 +171,6 @@ struct LinkAccountView: View {
     }
 
     // MARK: - Actions
-
-    private func errorCard(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Theme.loss)
-            Text(message)
-                .font(.subheadline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(Theme.cardPadding)
-        .background(Theme.loss.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .cardShadow()
-    }
 
     /// A full-width button in the sheet body rather than a toolbar item: on a
     /// first link this is the whole point of the screen, and a small "Log In"

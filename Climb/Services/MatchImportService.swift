@@ -50,9 +50,7 @@ enum MatchImportService {
     /// change, or a timeline an earlier sync couldn't fetch — so the player
     /// never has to know a backfill exists.
     static func refreshIfNeeded(context: ModelContext) async {
-        guard let account = try? context.fetch(FetchDescriptor<LinkedAccount>()).first,
-              let platform = RiotPlatform(rawValue: account.platform)
-        else { return }
+        guard let account = try? context.fetch(FetchDescriptor<LinkedAccount>()).first else { return }
 
         let current = currentDataVersion
         var stale = FetchDescriptor<Match>(predicate: #Predicate {
@@ -61,8 +59,16 @@ enum MatchImportService {
         stale.fetchLimit = 1
         let hasStale = account.syncedGames.contains(.league) && ((try? context.fetchCount(stale)) ?? 0) > 0
         guard hasStale || apiKeyChangedSinceLastImport else { return }
+        try? await syncLinkedAccount(context: context)
+    }
 
-        try? await linkAndSync(
+    /// Re-syncs the linked account with its stored Riot ID and game choices —
+    /// what pull-to-refresh does. No account linked is a no-op.
+    static func syncLinkedAccount(context: ModelContext) async throws {
+        guard let account = try context.fetch(FetchDescriptor<LinkedAccount>()).first,
+              let platform = RiotPlatform(rawValue: account.platform)
+        else { return }
+        try await linkAndSync(
             gameName: account.riotGameName,
             tagLine: account.riotTagline,
             platform: platform,

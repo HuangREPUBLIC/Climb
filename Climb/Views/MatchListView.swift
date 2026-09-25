@@ -69,7 +69,7 @@ struct MatchListView: View {
                         // Same standard pull-to-refresh gesture as Profile —
                         // one consistent way to get new matches everywhere the
                         // match list appears, rather than only from the sheet.
-                        .refreshable { await refresh() }
+                        .refreshable { try? await MatchImportService.syncLinkedAccount(context: modelContext) }
                     }
                 }
             }
@@ -90,17 +90,6 @@ struct MatchListView: View {
         .sheet(isPresented: $showingLinkAccount) {
             LinkAccountView()
         }
-    }
-
-    private func refresh() async {
-        guard let account, let platform = RiotPlatform(rawValue: account.platform) else { return }
-        try? await MatchImportService.linkAndSync(
-            gameName: account.riotGameName,
-            tagLine: account.riotTagline,
-            platform: platform,
-            gamesToSync: Set(account.syncedGames),
-            context: modelContext
-        )
     }
 
     @ViewBuilder

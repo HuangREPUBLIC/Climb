@@ -7,13 +7,9 @@ struct ProfileView: View {
     @State private var showingLinkAccount = false
     @AppStorage("selectedGameFilter") private var selectedGameRaw = GameFilter.league.rawValue
 
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.modelContext) private var modelContext
 
-    @ScaledMetric(relativeTo: .title2) private var avatarSize: CGFloat = 82
-    @ScaledMetric(relativeTo: .caption) private var rankIconSize: CGFloat = 26
-    @ScaledMetric(relativeTo: .title3) private var summaryDividerHeight: CGFloat = 40
 
     /// An iPad has room for more than the phone's five rows — filling that
     /// space is the point of the extra width, not stretching five rows across
@@ -60,7 +56,7 @@ struct ProfileView: View {
         // The standard system gesture for "get the latest data," so refreshing
         // no longer requires opening the sync sheet — a swipe down is a pattern
         // every iOS user already knows from Mail, News and the App Store.
-        .refreshable { await refresh() }
+        .refreshable { try? await MatchImportService.syncLinkedAccount(context: modelContext) }
         .navigationTitle("Profile")
         // Inline centres the title and removes the large-title block that sat
         // above the banner — that gap was what made the square top edge read
@@ -104,30 +100,9 @@ struct ProfileView: View {
         }
     }
 
-    /// Backs pull-to-refresh with the same sync the Link/Sync sheet runs, using
-    /// the account's already-stored credentials and game selection.
-    private func refresh() async {
-        guard let account, let platform = RiotPlatform(rawValue: account.platform) else { return }
-        try? await MatchImportService.linkAndSync(
-            gameName: account.riotGameName,
-            tagLine: account.riotTagline,
-            platform: platform,
-            gamesToSync: Set(account.syncedGames),
-            context: modelContext
-        )
-    }
-
     // MARK: - Header
 
-    /// Everything sits inside the banner rather than straddling its edge —
-    /// an avatar half-on/half-off the gradient seam reads as cramped, and the
-    /// hard colour boundary it created was the most jarring edge on the screen.
     /// The player's most-played champion, used as the banner's backdrop.
-    ///
-    /// A flat accent gradient said nothing about the person it belonged to.
-    /// Splash art of whoever they actually play does — and it gives the glass
-    /// chip something to refract, since glass over a solid fill is just a
-    /// translucent rectangle.
     private var bannerChampion: String? {
         Dictionary(grouping: leagueMatches) { $0.leagueStats?.champion ?? "" }
             .filter { !$0.key.isEmpty }
@@ -136,153 +111,31 @@ struct ProfileView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 12) {
-            avatarView
-            identityBlock
-        }
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity)
-        .padding(.top, 12)
-        .padding(.bottom, 24)
-        .background { bannerBackdrop }
-        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 28, bottomTrailingRadius: 28))
-    }
-
-    @ViewBuilder
-    private var bannerBackdrop: some View {
-        ZStack {
-            if let bannerChampion, let url = DataDragonService.shared.splashArtURL(for: bannerChampion) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        accentFallback
+        ProfileBanner(
+            profileIconID: account?.profileIconID,
+            level: account?.summonerLevel,
+            bannerChampion: bannerChampion
+        ) {
+            if let account {
+                VStack(spacing: 12) {
+                    BannerTitle(text: account.riotID)
+                    RankChip(tier: account.rankTier, division: account.rankDivision, leaguePoints: account.leaguePoints)
+                }
+            } else {
+                VStack(spacing: 10) {
+                    Text("No Riot account linked")
+                        .font(.title3.bold())
+                        .foregroundStyle(.white)
+                    Button("Link Riot Account") {
+                        showingLinkAccount = true
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white.opacity(0.9))
+                    .foregroundStyle(Color.accentColor)
                 }
-            } else {
-                accentFallback
-            }
-
-            // Splash art puts the champion off to one side and can be bright
-            // anywhere, so the scrim carries the text contrast on its own
-            // rather than trusting the art to be dark where the text lands.
-            LinearGradient(
-                stops: [
-                    .init(color: .black.opacity(0.55), location: 0),
-                    .init(color: .black.opacity(0.28), location: 0.45),
-                    .init(color: .black.opacity(0.70), location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-    }
-
-    /// Used before any match has been synced, and whenever the art fails to
-    /// load — the banner should never collapse to a blank rectangle.
-    private var accentFallback: some View {
-        LinearGradient(
-            colors: [Theme.accent, Theme.accent.opacity(0.72)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private var avatarView: some View {
-        Group {
-            if let account, let iconID = account.profileIconID {
-                ProfileIconView(profileIconID: iconID, size: avatarSize)
-            } else {
-                Circle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: avatarSize, height: avatarSize)
-                    .overlay {
-                        Image(systemName: "person.fill")
-                            .font(.largeTitle)
-                            .foregroundStyle(.white)
-                    }
-            }
-        }
-        .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 3))
-        // Level rides on the portrait the way the game client draws it, which
-        // frees the row below for the one fact worth a chip of its own.
-        .overlay(alignment: .bottom) {
-            if let level = account?.summonerLevel {
-                Text("\(level)")
-                    .font(.caption2.weight(.bold).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(.black.opacity(0.6), in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.5), lineWidth: 1))
-                    .offset(y: 7)
-            }
-        }
-        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
-    }
-
-    @ViewBuilder
-    private var identityBlock: some View {
-        if let account {
-            VStack(spacing: 12) {
-                Text(account.riotID)
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.5)
-                    .frame(maxWidth: .infinity)
-                    .shadow(color: .black.opacity(0.45), radius: 6, y: 1)
-
-                rankChip(for: account)
-            }
-            .frame(maxWidth: .infinity)
-        } else {
-            VStack(spacing: 10) {
-                Text("No Riot account linked")
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
-                Button("Link Riot Account") {
-                    showingLinkAccount = true
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.white.opacity(0.9))
-                .foregroundStyle(Color.accentColor)
             }
         }
     }
-
-    /// One chip now that the level lives on the portrait. Liquid Glass rather
-    /// than a white wash: it picks up the art behind it instead of flattening
-    /// a rectangle over it.
-    private func rankChip(for account: LinkedAccount) -> some View {
-        HStack(spacing: 6) {
-            if let tier = account.rankTier, let division = account.rankDivision {
-                RankIconView(tier: tier, size: rankIconSize)
-                Text(RankEmblemService.displayName(tier: tier, division: division))
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                if let lp = account.leaguePoints {
-                    Text("\u{00B7} \(lp) LP")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-            } else {
-                Image(systemName: "shield.lefthalf.filled")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-                Text("Unranked")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-            }
-        }
-        .lineLimit(1)
-        .minimumScaleFactor(0.7)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glassEffect()
-    }
-
 
     /// Riot's match API can run behind the account itself — event queues in
     /// particular have gone unpublished for hours at a time. Without saying so,
@@ -325,49 +178,11 @@ struct ProfileView: View {
     private var summaryCard: some View {
         let wins = leagueMatches.filter(\.win).count
         let winRate = leagueMatches.isEmpty ? 0 : Double(wins) / Double(leagueMatches.count) * 100
-        // Only win rate is colour-coded, because only it carries meaning
-        // (above or below even). The others were decorative tints.
-        let columns = [
-            statColumn(icon: "gamecontroller.fill", tint: .secondary, label: "Matches", value: "\(matches.count)"),
-            statColumn(icon: "percent", tint: winRate >= 50 ? Theme.win : Theme.loss, label: "Win rate", value: "\(Int(winRate.rounded()))%"),
-            statColumn(icon: "trophy.fill", tint: .yellow, label: "Record", value: "\(wins)-\(leagueMatches.count - wins)")
-        ]
-
-        // Three columns become three rows at accessibility sizes: a third of
-        // the width can't hold "Win rate" and its number without truncating.
-        return Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(spacing: 12) {
-                    ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                        if index > 0 { Divider() }
-                        column
-                    }
-                }
-            } else {
-                HStack(spacing: 0) {
-                    ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                        if index > 0 { Divider().frame(height: summaryDividerHeight) }
-                        column
-                    }
-                }
-            }
-        }
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .cardShadow()
-    }
-
-    private func statColumn(icon: String, tint: Color, label: String, value: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(tint)
-            Text(value).font(.title3.bold()).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
+        return StatSummaryCard(stats: [
+            .init(icon: "gamecontroller.fill", label: "Matches", value: "\(matches.count)"),
+            .init(icon: "percent", tint: winRate >= 50 ? Theme.win : Theme.loss, label: "Win rate", value: "\(Int(winRate.rounded()))%"),
+            .init(icon: "trophy.fill", tint: .yellow, label: "Record", value: "\(wins)-\(leagueMatches.count - wins)")
+        ])
     }
 
     // MARK: - Recent matches
