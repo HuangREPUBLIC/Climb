@@ -44,6 +44,14 @@ struct LinkAccountView: View {
                     gamesCard
                     if let errorMessage { ErrorCard(message: errorMessage) }
                     syncButton
+                    NavigationLink {
+                        APIKeysView()
+                    } label: {
+                        Label("API Keys", systemImage: "key")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
                 }
                 .padding()
                 .readableContentWidth()

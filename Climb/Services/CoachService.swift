@@ -84,13 +84,36 @@ enum CoachService {
         try await task.value
     }
 
-    private static func buildSystemPrompt(for match: Match, allMatches: [Match]) async -> String {
-        var lines = [
-            "You are Climb's AI coach, a supportive but honest coach for League of Legends and TFT.",
-            "Ground every answer in the player's own stats below — never give generic strategy advice.",
-            // The app parses this shape into a verdict, findings and one action
-            // (see CoachReply). Prose still renders, just as a plain paragraph,
-            // so these are instructions rather than a contract the app relies on.
+    /// The trend card's read of `TrendSummary`: what keeps costing games and
+    /// the one habit to fix first. One request at a time, for the same reason
+    /// as reviews.
+    private static var diagnosesInFlight: [String: Task<String, Error>] = [:]
+
+    /// `key` identifies the set of games summarised; a request for one set
+    /// is never handed to a caller asking about another.
+    static func diagnose(_ summary: TrendSummary, key: String) async throws -> String {
+        if let running = diagnosesInFlight[key] { return try await running.value }
+        let prompt = [
+            "You are Climb's AI coach, a supportive but honest coach for League of Legends.",
+            "Below are patterns computed from the player's last \(summary.games) games. Name what recurs across them — never a single game, never generic advice."
+        ] + replyFormat + summary.promptLines
+        let task = Task { @MainActor in
+            defer { diagnosesInFlight[key] = nil }
+            return try await AICoachClient.shared.send(
+                systemPrompt: prompt.joined(separator: "\n"),
+                history: [],
+                newUserMessage: "What keeps costing me games, and what should I fix first?"
+            )
+        }
+        diagnosesInFlight[key] = task
+        return try await task.value
+    }
+
+    /// The app parses this shape into a verdict, findings and one action (see
+    /// CoachReply). Prose still renders, just as a plain paragraph, so these
+    /// are instructions rather than a contract the app relies on.
+    private static var replyFormat: [String] {
+        [
             "Answer in this shape, and keep it short — the player is reading on a phone:",
             "1. One sentence of verdict, under 140 characters, on its own first line.",
             "2. Up to three findings, each on its own line starting with '- ', one clause each.",
@@ -98,6 +121,13 @@ enum CoachService {
             "Cite the player's actual numbers inside the findings. No headings, no preamble, no sign-off.",
             "Write in \(replyLanguage), but keep the '- ' markers and the literal 'Try:' prefix so the app can lay the reply out."
         ]
+    }
+
+    private static func buildSystemPrompt(for match: Match, allMatches: [Match]) async -> String {
+        var lines = [
+            "You are Climb's AI coach, a supportive but honest coach for League of Legends and TFT.",
+            "Ground every answer in the player's own stats below — never give generic strategy advice."
+        ] + replyFormat
 
         // Browsed copies of other players' games live in the same store, and
         // the caller's order isn't guaranteed — newest first, own games only.

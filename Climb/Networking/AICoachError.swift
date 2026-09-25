@@ -11,7 +11,7 @@ enum AICoachError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "No LLM API key configured. Add a free key from aistudio.google.com/apikey to Secrets.geminiAPIKey."
+            return "No LLM API key configured. Add a free key from aistudio.google.com/apikey under Riot Account → API Keys."
         case .network(let error):
             return "Network error: \(error.localizedDescription)"
         case .requestFailed(let code):

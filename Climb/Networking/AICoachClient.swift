@@ -12,13 +12,15 @@ actor AICoachClient {
 
     private let session = URLSession.shared
     private let endpoint = URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")!
-    /// gemini-2.5-flash now 404s for new keys ("no longer available to new
-    /// users"), which is what broke the coach. Verified 3.6-flash returns 200
-    /// with this key.
-    private let model = "gemini-3.6-flash"
+    /// Best first, then a lighter model with a far larger free allowance.
+    /// 3.6-flash's free tier is 20 requests a day (verified from its 429), and
+    /// an auto-generated review per game spends that by lunchtime; 3.1-flash-lite
+    /// answers the same prompt in ~2s. gemini-2.5-flash 404s for new keys.
+    private let models = ["gemini-3.6-flash", "gemini-3.1-flash-lite"]
 
     func send(systemPrompt: String, history: [ChatMessage], newUserMessage: String) async throws -> String {
-        guard !Secrets.geminiAPIKey.isEmpty else {
+        let apiKey = APIKeys.gemini
+        guard !apiKey.isEmpty else {
             throw AICoachError.missingAPIKey
         }
 
@@ -28,18 +30,7 @@ actor AICoachClient {
         }
         messages.append(["role": "user", "content": newUserMessage])
 
-        let body: [String: Any] = [
-            "model": model,
-            "messages": messages
-        ]
-
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(Secrets.geminiAPIKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        let data = try await perform(request)
+        let data = try await perform(messages: messages, apiKey: apiKey)
 
         do {
             let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
@@ -54,11 +45,18 @@ actor AICoachClient {
         }
     }
 
-    /// Gemini's free tier answers 503 ("high demand") or 429 in bursts that
-    /// clear within seconds, so one delayed retry turns most of those failures
-    /// into a normal reply.
-    private func perform(_ request: URLRequest) async throws -> Data {
-        for attempt in 0..<2 {
+    /// Walks down `models` while Gemini says "not now" or "not this model":
+    /// 429 (quota spent), 503 (high demand), 404 (model retired, as 2.5-flash
+    /// was). Anything else — a bad key, a bad request — is a real failure.
+    private func perform(messages: [[String: String]], apiKey: String) async throws -> Data {
+        var lastCode = 0
+        for model in models {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: ["model": model, "messages": messages])
+
             let data: Data
             let response: URLResponse
             do {
@@ -66,15 +64,11 @@ actor AICoachClient {
             } catch {
                 throw AICoachError.network(error)
             }
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if (200..<300).contains(code) { return data }
-            if attempt == 0, code == 503 || code == 429 {
-                try await Task.sleep(for: .seconds(2))
-                continue
-            }
-            throw AICoachError.requestFailed(code)
+            lastCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if (200..<300).contains(lastCode) { return data }
+            guard [429, 503, 404].contains(lastCode) else { break }
         }
-        throw AICoachError.requestFailed(0)
+        throw AICoachError.requestFailed(lastCode)
     }
 
     private struct ChatCompletionResponse: Decodable {

@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var matchPath = NavigationPath()
 
     @ObservedObject private var router = NotificationRouter.shared
+    @ObservedObject private var keyPrompt = APIKeyPrompt.shared
 
     private enum Tab {
         case matches, stats, search
@@ -49,7 +50,13 @@ struct ContentView: View {
             }
             .tag(Tab.search)
         }
+        .sheet(isPresented: $keyPrompt.riotKeyRejected) {
+            NavigationStack {
+                APIKeysView(reason: "Riot rejected the API key. Personal keys expire after 24 hours — paste today's to keep syncing.")
+            }
+        }
         .task {
+            APIKeys.seedFromSecretsIfNeeded()
             NotificationRouter.shared.start()
             #if DEBUG
             PerformanceScore.selfCheck()

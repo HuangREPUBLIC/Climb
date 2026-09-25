@@ -75,7 +75,7 @@ actor RiotAPIClient {
 
     private func get<T: Decodable>(_ url: URL, decoder: JSONDecoder = JSONDecoder()) async throws -> T {
         var request = URLRequest(url: url)
-        request.setValue(Secrets.riotAPIKey, forHTTPHeaderField: "X-Riot-Token")
+        request.setValue(APIKeys.riot, forHTTPHeaderField: "X-Riot-Token")
 
         let data: Data
         let response: URLResponse
@@ -93,6 +93,9 @@ actor RiotAPIClient {
         case 200..<300:
             break
         case 401, 403:
+            // Almost always today's personal key having expired — ask for a
+            // new one rather than failing every sync quietly.
+            await MainActor.run { APIKeyPrompt.shared.riotKeyRejected = true }
             throw RiotAPIError.unauthorized
         case 404:
             throw RiotAPIError.invalidRiotID

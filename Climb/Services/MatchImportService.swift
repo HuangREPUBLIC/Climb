@@ -35,7 +35,7 @@ enum MatchImportService {
     /// SHA-256 rather than `Hasher`/`hashValue`: Swift seeds those randomly
     /// per process, so the same key would hash differently on every launch.
     private static var currentKeyFingerprint: String {
-        let digest = SHA256.hash(data: Data(Secrets.riotAPIKey.utf8))
+        let digest = SHA256.hash(data: Data(APIKeys.riot.utf8))
         return digest.map { String(format: "%02x", $0) }.joined().prefix(16).description
     }
 
@@ -167,6 +167,8 @@ enum MatchImportService {
                 } catch RiotAPIError.network {
                     hitRateLimit = true
                     break
+                } catch RiotAPIError.unauthorized {
+                    throw RiotAPIError.unauthorized
                 } catch {
                     unavailableIDs.insert(matchID)
                     continue
@@ -188,6 +190,9 @@ enum MatchImportService {
         gamesToSync: Set<Game>,
         context: ModelContext
     ) async throws {
+        // A prompt that couldn't show (another sheet was up) mustn't stay
+        // raised forever; the next 401 raises it again.
+        APIKeyPrompt.shared.riotKeyRejected = false
         let region = platform.region
         let client = RiotAPIClient.shared
         let puuid = try await client.resolvePUUID(gameName: gameName, tagLine: tagLine, region: region)
@@ -329,6 +334,10 @@ enum MatchImportService {
                 break
             } catch RiotAPIError.unexpectedStatus(let code) where code >= 500 {
                 continue // Riot hiccup — stays stale, retried next sync
+            } catch RiotAPIError.unauthorized {
+                // The key expired mid-sync: stop, and leave the rest for the
+                // next key rather than writing them off as unavailable.
+                throw RiotAPIError.unauthorized
             } catch {
                 // Riot will never serve this match (gone, or undecodable), so
                 // stop retrying it on every launch. Its old rows stay as they are.
@@ -364,6 +373,8 @@ enum MatchImportService {
             complete = false
         } catch RiotAPIError.unexpectedStatus(let code) where code >= 500 {
             complete = false
+        } catch RiotAPIError.unauthorized {
+            throw RiotAPIError.unauthorized
         } catch {
             // No timeline exists for this game (old, or a mode without one) —
             // nothing a retry would change.

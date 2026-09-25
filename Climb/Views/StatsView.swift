@@ -90,6 +90,12 @@ struct StatsView: View {
                 )
             } else {
                 ScrollView {
+                    // Across every mode, so it sits above the mode filter.
+                    let ownLeague = gameMatches.filter { $0.leagueStats != nil }.reversed()
+                    if selectedGame == .league, ownLeague.count >= 5 {
+                        TrendDiagnosisCard(matches: Array(ownLeague))
+                            .padding([.horizontal, .top])
+                    }
                     if queues.count > 1 {
                         TagFilterBar(tags: queues, selection: $queueFilter)
                     }
