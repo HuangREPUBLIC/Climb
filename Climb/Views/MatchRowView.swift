@@ -1,185 +1,190 @@
 import SwiftUI
 
+/// One game in a match list, op.gg-style: the outcome as a colour bar, the
+/// loadout beside the portrait, KDA and score on top, the build underneath.
 struct MatchRowView: View {
     let match: Match
-    /// The account's current rank, shown as the "模式 | 段位" context line.
-    /// Riot's match data carries no per-match tier, so this is today's rank
-    /// rather than the rank held when the game was played.
-    var rankLabel: String?
-    /// List/NavigationLink already draws its own disclosure chevron;
-    /// only draw ours when this row lives in a plain (non-List) container.
-    var showsChevron: Bool = false
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @ScaledMetric(relativeTo: .subheadline) private var rawPortraitSize: CGFloat = 44
     private var portraitSize: CGFloat { rawPortraitSize.capped(at: 72) }
+    @ScaledMetric(relativeTo: .caption2) private var loadoutSize: CGFloat = 20
+    @ScaledMetric(relativeTo: .caption2) private var itemSize: CGFloat = 20
 
-    private var resultColor: Color {
-        if let tftStats = match.tftStats { return tftStats.placement <= 4 ? .green : .red }
-        return match.win ? .green : .red
+    private var me: MatchParticipantSummary? { match.focusParticipant }
+
+    private var won: Bool {
+        if let tft = match.tftStats { return tft.placement <= 4 }
+        return match.win
     }
+    private var resultColor: Color { won ? Theme.win : Theme.loss }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            if let stats = match.leagueStats {
-                ChampionIconView(championName: stats.champion, size: portraitSize)
-            } else if let stats = match.tftStats {
-                placementBadge(stats.placement)
-            } else {
-                Image(systemName: match.game.systemImageName)
-                    .font(.title3)
-                    .foregroundStyle(resultColor)
-                    .frame(width: portraitSize, height: portraitSize)
-            }
+        HStack(alignment: .center, spacing: 10) {
+            portrait
+            if let me { loadout(me) }
 
-            // Two rows: outcome + KDA/score on the first, context + timestamp
-            // on the second. The result colour lives in the word itself, so
-            // the decorative bar that used to sit on the left is gone.
             VStack(alignment: .leading, spacing: 4) {
-                // Outcome, KDA and score share one line while they fit. Every
-                // piece is `fixedSize`, so past that they would run off the
-                // edge rather than truncate — they stack instead.
-                if dynamicTypeSize.isAccessibilitySize {
-                    // Nothing here is `fixedSize` in this branch: at these
-                    // sizes a fixed KDA plus the chip is wider than the row.
-                    VStack(alignment: .leading, spacing: 4) {
-                        outcomeLabel
-                        if let tag = accolades.first { accoladeChip(tag) }
-                        scoreLine
-                        scoreChip
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        outcomeLabel
-                        if let tag = accolades.first { accoladeChip(tag) }
-                        Spacer(minLength: 4)
-                        scoreLine
-                        scoreChip
-                    }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    headline
+                    if let accolade = accolades.first { accoladeChip(accolade) }
+                    Spacer(minLength: 4)
+                    scoreChip
                 }
 
-                // One line, mode/rank truncating and the timestamp holding the
-                // trailing edge. Only at accessibility sizes, where truncating
-                // would leave a few characters, do the two stack.
-                Group {
-                    if dynamicTypeSize.isAccessibilitySize {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(subtitleText)
-                            Text(match.timestamp, format: Self.timestampFormat)
-                        }
-                    } else {
-                        HStack(spacing: 5) {
-                            Text(subtitleText)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Spacer(minLength: 6)
-                            Text(match.timestamp, format: Self.timestampFormat)
-                                .fixedSize()
-                        }
-                    }
+                HStack(spacing: 4) {
+                    Text("\(Text(outcomeText).foregroundStyle(resultColor).fontWeight(.semibold)) · \(match.queueType)")
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text(match.timestamp, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
+                        .fixedSize()
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            }
 
-            if showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.vertical, 5)
-    }
-
-    @ViewBuilder
-    private var outcomeLabel: some View {
-        let text = match.tftStats == nil
-            ? Text(match.win ? "Victory" : "Defeat").foregroundStyle(resultColor)
-            : Text(titleText)
-        text
-            .font(.subheadline.weight(.bold))
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
-            .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
-    }
-
-    @ViewBuilder
-    private var scoreLine: some View {
-        if let stats = match.leagueStats {
-            if dynamicTypeSize.isAccessibilitySize {
-                // One concatenated `Text` here, not five separate ones: five
-                // views each shrink on their own, so the kill count truncates
-                // to "…" while the assists stay full size.
-                (Text("\(stats.kills)")
-                    + Text("/").foregroundStyle(.tertiary)
-                    + Text("\(stats.deaths)").foregroundStyle(.red)
-                    + Text("/").foregroundStyle(.tertiary)
-                    + Text("\(stats.assists)"))
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .accessibilityLabel("\(stats.kills) kills, \(stats.deaths) deaths, \(stats.assists) assists")
-            } else {
                 HStack(spacing: 2) {
-                    Text("\(stats.kills)")
-                    Text("/").foregroundStyle(.tertiary)
-                    Text("\(stats.deaths)").foregroundStyle(.red)
-                    Text("/").foregroundStyle(.tertiary)
-                    Text("\(stats.assists)")
+                    if let stats = match.leagueStats {
+                        itemStrip(stats.items)
+                    } else if let tft = match.tftStats {
+                        Text(tft.traits.prefix(3).joined(separator: " · "))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 6)
+                    Text(durationText)
+                        .monospacedDigit()
+                        .fixedSize()
                 }
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .fixedSize()
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(stats.kills) kills, \(stats.deaths) deaths, \(stats.assists) assists")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
-        } else if let stats = match.tftStats {
-            Text("Lv \(stats.level)")
-                .font(.subheadline.weight(.semibold))
-                .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
+        }
+        .padding(.vertical, 8)
+        .padding(.leading, 12)
+        .background(alignment: .leading) {
+            Capsule().fill(resultColor).frame(width: 4)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Pieces
+
+    @ViewBuilder
+    private var portrait: some View {
+        if let stats = match.leagueStats {
+            ChampionIconView(championName: stats.champion, size: portraitSize)
+        } else if let tft = match.tftStats {
+            RoundedRectangle(cornerRadius: portraitSize * 0.22)
+                .fill(resultColor.opacity(0.15))
+                .frame(width: portraitSize, height: portraitSize)
+                .overlay {
+                    Text("#\(tft.placement)")
+                        .font(.headline)
+                        .foregroundStyle(resultColor)
+                }
         }
     }
 
+    /// Summoner spells over the keystone and secondary tree, the way op.gg
+    /// and the client both draw a loadout.
+    private func loadout(_ player: MatchParticipantSummary) -> some View {
+        let spells = player.summonerSpellIDs
+        return Grid(horizontalSpacing: 2, verticalSpacing: 2) {
+            GridRow {
+                cell(spells.first.map { SpellIconView(spellID: $0, size: loadoutSize) })
+                cell(player.keystoneID == 0 ? nil : RuneIconView(runeID: player.keystoneID, size: loadoutSize))
+            }
+            GridRow {
+                cell(spells.dropFirst().first.map { SpellIconView(spellID: $0, size: loadoutSize) })
+                cell(player.subStyleID == 0 ? nil : RuneIconView(runeID: player.subStyleID, size: loadoutSize))
+            }
+        }
+    }
+
+    /// A missing spell or rune keeps its cell, so nothing shifts columns.
+    @ViewBuilder
+    private func cell<V: View>(_ view: V?) -> some View {
+        if let view { view } else { Color.clear.frame(width: loadoutSize, height: loadoutSize) }
+    }
+
+    @ViewBuilder
+    private var headline: some View {
+        if let stats = match.leagueStats {
+            let slash = Text(" / ").foregroundStyle(.tertiary)
+            Text("\(stats.kills)\(slash)\(Text("\(stats.deaths)").foregroundStyle(Theme.loss))\(slash)\(stats.assists)")
+                .font(.subheadline.weight(.bold).monospacedDigit())
+                .lineLimit(1)
+                .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
+                .accessibilityLabel("\(stats.kills) kills, \(stats.deaths) deaths, \(stats.assists) assists")
+        } else if let tft = match.tftStats {
+            Text("Level \(tft.level)")
+                .font(.subheadline.weight(.bold))
+        }
+    }
+
+    /// The score, with MVP / SVP beside it when the player earned one.
     @ViewBuilder
     private var scoreChip: some View {
         if let score = PerformanceScore.compute(for: match) {
-            Text(String(format: "%.1f", score))
-                .font(.caption.weight(.bold).monospacedDigit())
-                .foregroundStyle(PerformanceScore.color(for: score))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(PerformanceScore.color(for: score).opacity(0.14))
-                .clipShape(RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
-                .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
+            let awards = PerformanceScore.awards(in: match)
+            let award: MatchAward? = me.flatMap {
+                $0.puuid == awards.mvp ? .mvp : $0.puuid == awards.svp ? .svp : nil
+            }
+            HStack(spacing: 4) {
+                if let award {
+                    Text(award.text)
+                        .scaledFont(9, weight: .black)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1.5)
+                        .background(award.tint, in: RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
+                }
+                Text(String(format: "%.1f", score))
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(PerformanceScore.color(for: score))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(PerformanceScore.color(for: score).opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
+            }
+            .fixedSize()
         }
     }
 
-    /// Absolute time, since "4 days ago" tells you nothing about which of that
-    /// evening's games this was.
-    private static let timestampFormat = Date.FormatStyle()
-        .month(.abbreviated)
-        .day()
-        .hour(.defaultDigits(amPM: .abbreviated))
-        .minute()
-
-    /// Mode plus rank, matching the reference app's "单双排 | 白银 IV" row.
-    /// The champion name is dropped because the portrait already says it.
-    private var subtitleText: String {
-        var parts: [String] = [match.queueType]
-        if let rankLabel, !rankLabel.isEmpty {
-            parts.append(rankLabel)
+    /// Seven fixed slots — build 0-5, trinket 6 — read by index so a
+    /// half-finished build never slides the trinket into the build.
+    private func itemStrip(_ items: [Int]) -> some View {
+        HStack(spacing: 2) {
+            ForEach(0..<7, id: \.self) { index in
+                let item = index < items.count ? items[index] : 0
+                if item != 0 {
+                    ItemIconView(itemID: item, size: itemSize, interactive: false)
+                } else {
+                    RoundedRectangle(cornerRadius: itemSize * 0.2)
+                        .fill(.secondary.opacity(0.08))
+                        .frame(width: itemSize, height: itemSize)
+                }
+            }
         }
-        return parts.joined(separator: " | ")
     }
+
+    private var outcomeText: String {
+        if match.tftStats != nil { return won ? "Top 4" : "Bottom 4" }
+        return won ? "Victory" : "Defeat"
+    }
+
+    private var durationText: String {
+        String(format: "%d:%02d", match.gameDurationSeconds / 60, match.gameDurationSeconds % 60)
+    }
+
+    // MARK: - Accolades
 
     /// At most one badge, and only for something genuinely uncommon.
     ///
-    /// A double kill happens most games, and a tank main leads damage-taken
-    /// nearly every game — badges that appear on every row stop meaning
-    /// anything. So multi-kills start at triple, "most tanked" requires a real
-    /// margin over the runner-up rather than merely topping the list, and only
-    /// the single most impressive one is shown.
+    /// A double kill happens most games, and a tank main leads damage taken
+    /// nearly every game — badges on every row stop meaning anything. So
+    /// multi-kills start at triple, "most tanked" needs a real margin over the
+    /// runner-up, and only the single most impressive one is shown.
     struct Accolade: Hashable {
         let text: String
         let icon: String
@@ -193,8 +198,7 @@ struct MatchRowView: View {
         if stats.tripleKills > 0 { return [Accolade(text: "Triple Kill", icon: "flame.fill")] }
         if stats.firstBloodKill { return [Accolade(text: "First Blood", icon: "drop.fill")] }
 
-        guard let me = match.participants.first(where: \.isLinkedPlayer) else { return [] }
-
+        guard let me else { return [] }
         if leads(\.damageDealtToChampions, me: me, byMargin: 1.15) {
             return [Accolade(text: "Most Damage", icon: "burst.fill")]
         }
@@ -235,22 +239,5 @@ struct MatchRowView: View {
         .lineLimit(1)
         .minimumScaleFactor(0.6)
         .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
-    }
-
-    private var titleText: String {
-        if let stats = match.leagueStats { return stats.champion }
-        if match.tftStats != nil { return "Teamfight Tactics" }
-        return match.game.shortName
-    }
-
-    private func placementBadge(_ placement: Int) -> some View {
-        RoundedRectangle(cornerRadius: portraitSize * 0.22)
-            .fill(placement <= 4 ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
-            .frame(width: portraitSize, height: portraitSize)
-            .overlay {
-                Text("#\(placement)")
-                    .font(.headline)
-                    .foregroundStyle(placement <= 4 ? .green : .red)
-            }
     }
 }

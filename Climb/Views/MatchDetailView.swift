@@ -8,14 +8,17 @@ struct MatchDetailView: View {
     /// offered as a chip on the next one instead of retyped.
     @Query private var allMatches: [Match]
 
+    /// The scoreboard first — it is what a match screen is opened for — and
+    /// the player's own stat card one tab over instead of a screen above it.
     private enum DetailTab: String, CaseIterable, Identifiable {
-        case match = "Match"
+        case players = "Players"
         case team = "Team"
         case matchup = "Matchup"
+        case you = "You"
         var id: String { rawValue }
     }
 
-    @State private var selectedTab: DetailTab = .match
+    @State private var selectedTab: DetailTab = .players
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -30,7 +33,6 @@ struct MatchDetailView: View {
     @ScaledMetric(relativeTo: .subheadline) private var statTileMinWidth: CGFloat = 92
     @ScaledMetric(relativeTo: .caption) private var rateStatMinWidth: CGFloat = 62
     @ScaledMetric(relativeTo: .caption2) private var statGlyphSize: CGFloat = 24
-    @ScaledMetric(relativeTo: .title3) private var bannerSlant: CGFloat = 16
 
     private var statTileColumns: [GridItem] {
         dynamicTypeSize.isAccessibilitySize
@@ -38,24 +40,21 @@ struct MatchDetailView: View {
             : [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
     }
 
-    private var region: RiotRegion? {
-        RiotRegion(rawValue: accounts.first?.region ?? "")
+    /// The match's own server first: a game browsed from a Korean player's
+    /// profile has to look its players up in Korea, not on your server.
+    private var platform: RiotPlatform? {
+        match.platform ?? RiotPlatform(rawValue: accounts.first?.platform ?? "")
     }
 
-    private var platform: RiotPlatform? {
-        RiotPlatform(rawValue: accounts.first?.platform ?? "")
-    }
+    private var region: RiotRegion? { platform?.region }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
                 header
+                    .overlay(alignment: .topTrailing) { coachButton }
 
                 VStack(alignment: .leading, spacing: 16) {
-                    if let stats = match.leagueStats {
-                        leagueStatsSection(stats)
-                    }
-
                     if let stats = match.tftStats {
                         tftStatsSection(stats)
                     }
@@ -63,17 +62,11 @@ struct MatchDetailView: View {
                     if !match.participants.isEmpty {
                         tabPicker
                         tabContent
+                    } else if let stats = match.leagueStats {
+                        leagueStatsSection(stats)
                     }
 
                     reflectionSection
-
-                    NavigationLink(value: CoachRoute(match: match)) {
-                        Label("Ask the AI Coach", systemImage: "bubble.left.and.bubble.right")
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.accentColor.opacity(0.15))
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                    }
                 }
                 .padding()
             }
@@ -85,6 +78,17 @@ struct MatchDetailView: View {
         .navigationDestination(for: CoachRoute.self) { route in
             CoachChatView(match: route.match)
         }
+    }
+
+    /// On the header rather than at the foot of a long page, so the coach is
+    /// one tap from the moment the match opens.
+    private var coachButton: some View {
+        NavigationLink(value: CoachRoute(match: match)) {
+            Label("AI Review", systemImage: "sparkles")
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonStyle(.glass)
+        .padding(12)
     }
 
     @ViewBuilder
@@ -226,32 +230,8 @@ struct MatchDetailView: View {
         .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
     }
 
-    /// Outcome already reads loud and clear on the splash header, so this is
-    /// a light metadata strip rather than another stacked card repeating it.
-    private var resultSection: some View {
-        HStack(spacing: 8) {
-            metaChip(icon: "flag.checkered", text: match.queueType)
-            metaChip(icon: "clock", text: durationString)
-            metaChip(icon: "calendar", text: match.timestamp.formatted(date: .abbreviated, time: .omitted))
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func metaChip(icon: String, text: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).scaledFont(10)
-            Text(text).font(.caption)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(Capsule())
-    }
-
     private func leagueStatsSection(_ stats: LeagueStats) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Performance").font(.headline)
             sectionCard {
                 // KDA headline with the kill/death/assist split colour-coded
                 // and kill participation shown as a ring, rather than three
@@ -295,7 +275,7 @@ struct MatchDetailView: View {
                     iconStat("Vision", "\(stats.visionScore)", icon: "eye.fill", tint: .cyan)
                     iconStat("Dealt", stats.damageDealtToChampions.formatted(), icon: "burst.fill", tint: .red)
                     iconStat("Taken", stats.damageTaken.formatted(), icon: "shield.fill", tint: .blue)
-                    iconStat("Healed", stats.match?.participants.first(where: \.isLinkedPlayer)?.totalHeal.formatted() ?? "0", icon: "cross.case.fill", tint: .pink)
+                    iconStat("Healed", match.focusParticipant?.totalHeal.formatted() ?? "0", icon: "cross.case.fill", tint: .pink)
                 }
 
                 // Per-minute rates and standout moments, folded in here rather
@@ -379,7 +359,7 @@ struct MatchDetailView: View {
     private var tabPicker: some View {
         Picker("View", selection: $selectedTab) {
             ForEach(DetailTab.allCases) { tab in
-                Text(tab.rawValue).tag(tab)
+                Text(tab == .you && !match.isOwnHistory ? "Player" : tab.rawValue).tag(tab)
             }
         }
         .pickerStyle(.segmented)
@@ -388,199 +368,86 @@ struct MatchDetailView: View {
     @ViewBuilder
     private var tabContent: some View {
         switch selectedTab {
-        case .match:
+        case .players:
             scoreboardSection
         case .team:
             TeamComparisonView(match: match)
         case .matchup:
             PlayerMatchupView(match: match, region: region)
+        case .you:
+            if let stats = match.leagueStats { leagueStatsSection(stats) }
         }
     }
 
+    /// Your team first, each in lane order, one row per player.
     private var scoreboardSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Scoreboard").font(.headline)
-            teamTotalsBanner
-            // The scoreboard is the densest thing in the app — ten players,
-            // each with a portrait, a loadout and a stat line.
-            sectionCard {
-                if let matchups = laneMatchups {
-                    let awards = PerformanceScore.awards(in: match)
-                    ForEach(Array(matchups.enumerated()), id: \.offset) { index, matchup in
-                        LaneMatchupRowView(
-                            role: matchup.role,
-                            left: matchup.left,
-                            right: matchup.right,
-                            region: region,
-                            platform: platform,
+        let awards = PerformanceScore.awards(in: match)
+        let linkedTeamId = match.focusParticipant?.teamId
+        let teamIds = Set(match.participants.map(\.teamId)).sorted { a, b in
+            a == linkedTeamId || (b != linkedTeamId && a < b)
+        }
+        let laneOrder = ["Top", "Jungle", "Mid", "ADC", "Support"]
+
+        return VStack(spacing: 12) {
+            ForEach(teamIds, id: \.self) { teamId in
+                let players = match.participants
+                    .filter { $0.teamId == teamId }
+                    .sorted { (laneOrder.firstIndex(of: $0.role) ?? 5) < (laneOrder.firstIndex(of: $1.role) ?? 5) }
+                VStack(alignment: .leading, spacing: 0) {
+                    teamHeader(players, isFocusTeam: teamId == linkedTeamId)
+                    ForEach(Array(players.enumerated()), id: \.element.id) { index, player in
+                        if index > 0 { Divider() }
+                        ScoreboardRowView(
+                            participant: player,
                             match: match,
-                            mvpPUUID: awards.mvp,
-                            svpPUUID: awards.svp
+                            award: player.puuid == awards.mvp ? .mvp : player.puuid == awards.svp ? .svp : nil,
+                            region: region,
+                            platform: platform
                         )
-                        if index < matchups.count - 1 {
-                            Divider()
-                        }
-                    }
-                } else {
-                    let blue = match.participants.filter { $0.teamId == 100 }
-                    let red = match.participants.filter { $0.teamId == 200 }
-                    if !blue.isEmpty {
-                        Text("Blue Team").font(.caption.weight(.semibold)).foregroundStyle(.blue)
-                        ForEach(blue) { participant in
-                            participantRow(participant)
-                        }
-                    }
-                    if !red.isEmpty {
-                        if !blue.isEmpty { Divider().padding(.vertical, 2) }
-                        Text("Red Team").font(.caption.weight(.semibold)).foregroundStyle(.red)
-                        ForEach(red) { participant in
-                            participantRow(participant)
-                        }
                     }
                 }
+                .cardSurface()
             }
-            .denseRowScaling()
         }
     }
 
-    /// Both teams' aggregate kills/deaths/assists, above the ten rows.
-    ///
-    /// A personal 6/12/5 reads completely differently depending on whether the
-    /// team as a whole was 36/34/32 or 12/40/10, and nothing else on this
-    /// screen says which. The two sides meet at an angle rather than a vertical
-    /// seam so the band reads as one comparison instead of two panels.
-    @ViewBuilder
-    private var teamTotalsBanner: some View {
-        let linkedTeamId = match.participants.first(where: \.isLinkedPlayer)?.teamId ?? 100
-        let ally = match.participants.filter { $0.teamId == linkedTeamId }
-        let enemy = match.participants.filter { $0.teamId != linkedTeamId }
-
-        if !ally.isEmpty, !enemy.isEmpty {
-            let allySide = teamTotalsSide(
-                label: "Your team",
-                outcome: match.win ? "Victory" : "Defeat",
-                totals: teamKDA(ally),
-                won: match.win,
-                alignment: .leading
-            )
-            let enemySide = teamTotalsSide(
-                label: "Enemy",
-                outcome: match.win ? "Defeat" : "Victory",
-                totals: teamKDA(enemy),
-                won: !match.win,
-                alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing
-            )
-
-            Group {
-                // The angled split only works while the two sides share a row.
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(alignment: .leading, spacing: 10) {
-                        allySide
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .background(Theme.ally.opacity(0.14))
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                        enemySide
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .background(Theme.enemy.opacity(0.14))
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                    }
-                } else {
-                    HStack(spacing: 0) {
-                        allySide
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 10)
-                            .padding(.leading, 14)
-                            .padding(.trailing, bannerSlant + 8)
-                            .background(Theme.ally.opacity(0.14), in: SlantedBlock(slantsTrailing: true, slant: bannerSlant))
-
-                        Text("VS")
-                            .font(.caption2.weight(.black))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-
-                        enemySide
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .padding(.vertical, 10)
-                            .padding(.trailing, 14)
-                            .padding(.leading, bannerSlant + 8)
-                            .background(Theme.enemy.opacity(0.14), in: SlantedBlock(slantsTrailing: false, slant: bannerSlant))
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                }
-            }
-            .accessibilityElement(children: .combine)
-        }
-    }
-
-    private func teamTotalsSide(
-        label: String,
-        outcome: String,
-        totals: String,
-        won: Bool,
-        alignment: HorizontalAlignment
-    ) -> some View {
-        VStack(alignment: alignment, spacing: 1) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            // Tabular digits: the two sides' totals sit either side of the VS
-            // and would jitter against each other otherwise.
-            Text(totals)
-                .font(.title3.weight(.bold).monospacedDigit())
-            Text(outcome)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(won ? Theme.win : Theme.loss)
-        }
-        .lineLimit(1)
-        .minimumScaleFactor(0.7)
-    }
-
-    private func teamKDA(_ players: [MatchParticipantSummary]) -> String {
+    /// Team totals on the team's own header: a personal 6/12/5 reads very
+    /// differently when the team went 36/34/32 than when it went 12/40/10.
+    private func teamHeader(_ players: [MatchParticipantSummary], isFocusTeam: Bool) -> some View {
+        let won = players.first?.win ?? false
         let kills = players.map(\.kills).reduce(0, +)
         let deaths = players.map(\.deaths).reduce(0, +)
         let assists = players.map(\.assists).reduce(0, +)
-        return "\(kills)/\(deaths)/\(assists)"
+        let gold = Double(players.map(\.goldEarned).reduce(0, +)) / 1000
+
+        return HStack(spacing: 6) {
+            Capsule()
+                // Your side is blue in your own games; a browsed game keeps
+                // Riot's real sides so "Red team" is never drawn blue.
+                .fill((match.isOwnHistory ? isFocusTeam : players.first?.teamId == 100) ? Theme.ally : Theme.enemy)
+                .frame(width: 3, height: 14)
+            Text(teamTitle(isFocusTeam: isFocusTeam, teamId: players.first?.teamId))
+                .font(.subheadline.weight(.semibold))
+            Text(won ? "Victory" : "Defeat")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(won ? Theme.win : Theme.loss)
+            Spacer(minLength: 6)
+            Text("\(kills)/\(deaths)/\(assists)")
+                .font(.caption.weight(.semibold).monospacedDigit())
+            Text(String(format: "%.1fk", gold))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .combine)
     }
 
-    /// Pairs each role (Top/Jungle/Mid/ADC/Support) against its lane
-    /// opponent, linked player's team first. Falls back to a plain two-team
-    /// list (nil here) for ARAM/arena modes where roles aren't meaningful.
-    private var laneMatchups: [(role: String, left: MatchParticipantSummary?, right: MatchParticipantSummary?)]? {
-        let roleOrder = ["Top", "Jungle", "Mid", "ADC", "Support"]
-        let byRole = Dictionary(grouping: match.participants) { $0.role }
-        guard match.participants.allSatisfy({ roleOrder.contains($0.role) }) else { return nil }
-
-        let linkedTeamId = match.participants.first(where: \.isLinkedPlayer)?.teamId ?? 100
-        return roleOrder.compactMap { role -> (String, MatchParticipantSummary?, MatchParticipantSummary?)? in
-            guard let players = byRole[role], !players.isEmpty else { return nil }
-            let left = players.first { $0.teamId == linkedTeamId }
-            let right = players.first { $0.teamId != linkedTeamId }
-            return (role, left, right)
-        }
-    }
-
-    @ViewBuilder
-    private func participantRow(_ participant: MatchParticipantSummary) -> some View {
-        if participant.isLinkedPlayer {
-            ParticipantRowView(participant: participant)
-        } else if let region {
-            NavigationLink {
-                PlayerProfileView(
-                    puuid: participant.puuid,
-                    riotIdGameName: participant.riotIdGameName,
-                    riotIdTagline: participant.riotIdTagline,
-                    region: region,
-                    platform: platform
-                )
-            } label: {
-                ParticipantRowView(participant: participant)
-            }
-            .buttonStyle(PressableButtonStyle())
-        } else {
-            ParticipantRowView(participant: participant)
-        }
+    /// "Your team" only in your own games; a browsed game isn't yours.
+    private func teamTitle(isFocusTeam: Bool, teamId: Int?) -> String {
+        if match.isOwnHistory { return isFocusTeam ? "Your team" : "Enemy team" }
+        return teamId == 100 ? "Blue team" : "Red team"
     }
 
     private var reflectionSection: some View {
@@ -611,7 +478,7 @@ struct MatchDetailView: View {
     }
 
     private func killParticipation(for stats: LeagueStats) -> Int? {
-        guard let linkedTeamId = match.participants.first(where: \.isLinkedPlayer)?.teamId else { return nil }
+        guard let linkedTeamId = match.focusParticipant?.teamId else { return nil }
         let teamKills = match.participants.filter { $0.teamId == linkedTeamId }.map(\.kills).reduce(0, +)
         guard teamKills > 0 else { return nil }
         return Int((Double(stats.kills + stats.assists) / Double(teamKills) * 100).rounded())
@@ -672,14 +539,6 @@ struct MatchDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 
-    private func statTile(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.subheadline.weight(.semibold)).monospacedDigit()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     @ViewBuilder
     private func sectionCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: Theme.itemSpacing) {
@@ -704,28 +563,4 @@ struct MatchDetailView: View {
 /// player landed back on whatever the coach was last discussing.
 struct CoachRoute: Hashable {
     let match: Match
-}
-
-/// A block with one slanted inner edge, so the two team totals meet at an angle
-/// instead of a hard vertical seam.
-private struct SlantedBlock: Shape {
-    let slantsTrailing: Bool
-    var slant: CGFloat = 16
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        if slantsTrailing {
-            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.maxX - slant, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        } else {
-            path.move(to: CGPoint(x: rect.minX + slant, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        }
-        path.closeSubpath()
-        return path
-    }
 }

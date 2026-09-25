@@ -2,16 +2,11 @@ import SwiftUI
 import SwiftData
 import Charts
 
-private struct ChampionPlayCount: Identifiable {
-    let champion: String
-    let count: Int
-    var id: String { champion }
-}
-
-private struct ChampionWinRate: Identifiable {
+private struct ChampionRecord: Identifiable {
     let champion: String
     let games: Int
     let wins: Int
+    let kda: Double
     var id: String { champion }
     var winRate: Double { games == 0 ? 0 : Double(wins) / Double(games) * 100 }
 }
@@ -25,6 +20,7 @@ private struct KDAGamePoint: Identifiable {
 
 private struct RoleWinRate: Identifiable {
     let role: String
+    let games: Int
     let winRate: Double
     var id: String { role }
 }
@@ -51,11 +47,17 @@ private struct TagWinRate: Identifiable {
 /// unchanged — only what surrounds them.
 struct StatsView: View {
     @Query(sort: \Match.timestamp, order: .forward) private var allMatches: [Match]
-    @AppStorage("selectedGameFilter") private var selectedGameRaw = GameFilter.league.rawValue
+    /// Shared with the Matches tab, so both screens stay on the same game.
+    @AppStorage("selectedGame") private var selectedGame: Game = .league
+    @State private var queueFilter: String?
 
-    /// Follows the game switcher in Profile — same @AppStorage key.
-    private var matches: [Match] {
-        allMatches.filter { $0.game == (GameFilter(rawValue: selectedGameRaw) ?? .league).game && $0.isOwnHistory }
+    private var gameMatches: [Match] { allMatches.filter { $0.game == selectedGame && $0.isOwnHistory } }
+    /// ARAM and normals would otherwise blend into a ranked win rate.
+    private var matches: [Match] { gameMatches.filter { match in queueFilter.map { match.queueType == $0 } ?? true } }
+    private var queues: [String] {
+        Dictionary(grouping: gameMatches, by: \.queueType)
+            .sorted { $0.value.count > $1.value.count }
+            .map(\.key)
     }
 
     /// Magnitude series use the app accent (not a screen-local teal) so Stats
@@ -66,11 +68,9 @@ struct StatsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @ScaledMetric(relativeTo: .subheadline) private var winRateColumnWidth: CGFloat = 46
-    @ScaledMetric(relativeTo: .caption) private var countColumnWidth: CGFloat = 24
-    @ScaledMetric(relativeTo: .caption) private var listPortraitSize: CGFloat = 28
-    @ScaledMetric(relativeTo: .caption) private var chartPortraitSize: CGFloat = 32
+    @ScaledMetric(relativeTo: .caption) private var countColumnWidth: CGFloat = 30
+    @ScaledMetric(relativeTo: .caption) private var listPortraitSize: CGFloat = 32
     @ScaledMetric(relativeTo: .caption2) private var legendDotSize: CGFloat = 6
-    @ScaledMetric(relativeTo: .caption2) private var championBarHeight: CGFloat = 7
     @ScaledMetric(relativeTo: .caption2) private var formPipHeight: CGFloat = 22
     /// Charts grow with the text so their axis labels stay proportionate
     /// rather than crowding a fixed-height plot.
@@ -82,7 +82,7 @@ struct StatsView: View {
 
     var body: some View {
         Group {
-            if matches.isEmpty {
+            if gameMatches.isEmpty {
                 ContentUnavailableView(
                     "No stats yet",
                     systemImage: "chart.line.uptrend.xyaxis",
@@ -90,18 +90,15 @@ struct StatsView: View {
                 )
             } else {
                 ScrollView {
+                    if queues.count > 1 {
+                        TagFilterBar(tags: queues, selection: $queueFilter)
+                    }
                     VStack(alignment: .leading, spacing: Theme.sectionSpacing) {
                         if !leagueMatches.isEmpty {
                             headlineCard(for: leagueMatches)
                             section("KDA by game") { kdaChart }
-                            section("Most played champions") { championChart }
+                            section("Champions") { championTable }
                             section("Win rate by role") { roleChart }
-                            section(
-                                "Win rate by champion",
-                                footnote: "Based only on your own synced matches — not a server-wide meta tier list (Riot's public API doesn't expose that)."
-                            ) {
-                                championWinRateList
-                            }
                         }
 
                         if !tagStats.isEmpty {
@@ -125,6 +122,12 @@ struct StatsView: View {
             }
         }
         .navigationTitle("Stats")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game)))
+            }
+        }
+        .onChange(of: selectedGame) { queueFilter = nil }
     }
 
     /// Title above, card below — the same rhythm as the match detail screen, so
@@ -278,46 +281,50 @@ struct StatsView: View {
 
     // MARK: - Champions
 
-    private var championWinRates: [ChampionWinRate] {
+    /// Every champion played, most played first: games, record, win rate and
+    /// KDA on one row — op.gg's champion table — instead of a play-count chart
+    /// and a win-rate list repeating the same champions.
+    private var championRecords: [ChampionRecord] {
         Dictionary(grouping: leagueMatches) { $0.leagueStats?.champion ?? "Unknown" }
-            .map { champion, matches in
-                ChampionWinRate(champion: champion, games: matches.count, wins: matches.filter(\.win).count)
+            .map { champion, games in
+                let lines = games.compactMap(\.leagueStats)
+                let kda = Double(lines.map { $0.kills + $0.assists }.reduce(0, +))
+                    / Double(max(lines.map(\.deaths).reduce(0, +), 1))
+                return ChampionRecord(champion: champion, games: games.count, wins: games.filter(\.win).count, kda: kda)
             }
-            .sorted { $0.games > $1.games }
+            .sorted { $0.games == $1.games ? $0.winRate > $1.winRate : $0.games > $1.games }
     }
 
     @ViewBuilder
-    private var championWinRateList: some View {
-        ForEach(Array(championWinRates.enumerated()), id: \.element.id) { index, entry in
+    private var championTable: some View {
+        ForEach(Array(championRecords.enumerated()), id: \.element.id) { index, entry in
             if index > 0 { Divider() }
-            // Four items on one line; only at accessibility sizes do the record
-            // and the percentage move under the champion name.
-            championWinRateRow(entry, stacked: dynamicTypeSize.isAccessibilitySize)
+            championRow(entry)
         }
     }
 
-    private func championWinRateRow(_ entry: ChampionWinRate, stacked: Bool) -> some View {
-        let record = Text("\(entry.wins)W-\(entry.games - entry.wins)L")
+    private func championRow(_ entry: ChampionRecord) -> some View {
+        let games = Text("\(entry.games)")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.secondary)
+        let record = Text("\(entry.wins)W \(entry.games - entry.wins)L · \(String(format: "%.2f", entry.kda)) KDA")
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
         let percentage = Text("\(Int(entry.winRate.rounded()))%")
             .font(.subheadline.weight(.semibold).monospacedDigit())
             .foregroundStyle(entry.winRate >= 50 ? Theme.win : Theme.loss)
 
-        return HStack {
+        return HStack(spacing: 10) {
             ChampionIconView(championName: entry.champion, size: listPortraitSize)
-            if stacked {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.champion).font(.subheadline)
-                    HStack(spacing: 8) { record; percentage }
-                }
-                Spacer(minLength: 0)
-            } else {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(entry.champion).font(.subheadline)
-                Spacer()
                 record
-                percentage.frame(width: winRateColumnWidth, alignment: .trailing)
             }
+            Spacer(minLength: 6)
+            if !dynamicTypeSize.isAccessibilitySize {
+                games.frame(width: countColumnWidth, alignment: .trailing)
+            }
+            percentage.frame(width: winRateColumnWidth, alignment: .trailing)
         }
         .accessibilityElement(children: .combine)
     }
@@ -346,9 +353,11 @@ struct StatsView: View {
 
         Chart {
             ForEach(points) { point in
+                // A 0-KDA game still gets a visible stub: a missing bar
+                // reads as a missing game, not a bad one.
                 BarMark(
                     x: .value("Game", point.index),
-                    y: .value("KDA", point.kda),
+                    y: .value("KDA", max(point.kda, 0.08)),
                     width: .fixed(9)
                 )
                 .foregroundStyle(point.win ? Color.green.gradient : Color.red.gradient)
@@ -394,62 +403,27 @@ struct StatsView: View {
         }
     }
 
-    /// Hand-rolled rather than a Swift Charts BarMark: Charts can't put an
-    /// image in a category axis label, and the champion portrait is the part
-    /// you actually scan for.
-    @ViewBuilder
-    private var championChart: some View {
-        let counts = Dictionary(grouping: leagueMatches) { $0.leagueStats?.champion ?? "Unknown" }
-            .map { ChampionPlayCount(champion: $0.key, count: $0.value.count) }
-            .sorted { $0.count > $1.count }
-            .prefix(6)
-        let maxCount = max(counts.map(\.count).max() ?? 1, 1)
-
-        ForEach(Array(counts)) { entry in
-            championRow(entry, maxCount: maxCount)
-        }
-    }
-
-    private func championRow(_ entry: ChampionPlayCount, maxCount: Int) -> some View {
-        let fraction = CGFloat(entry.count) / CGFloat(maxCount)
-        let intensity: Double = 0.45 + 0.55 * (Double(entry.count) / Double(maxCount))
-        return HStack(spacing: 10) {
-            ChampionIconView(championName: entry.champion, size: chartPortraitSize)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.champion).font(.caption.weight(.medium))
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(chartAccent.opacity(0.12))
-                        Capsule()
-                            .fill(chartAccent.opacity(intensity))
-                            .frame(width: max(geo.size.width * fraction, 4))
-                    }
-                }
-                .frame(height: championBarHeight)
-            }
-            Text("\(entry.count)")
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: countColumnWidth, alignment: .trailing)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(entry.champion), \(entry.count) games")
-    }
-
     @ViewBuilder
     private var roleChart: some View {
         let grouped = Dictionary(grouping: leagueMatches) { $0.leagueStats?.role ?? "—" }
         let stats = grouped.map { role, matches -> RoleWinRate in
             let wins = matches.filter(\.win).count
             let rate = matches.isEmpty ? 0 : Double(wins) / Double(matches.count) * 100
-            return RoleWinRate(role: role, winRate: rate)
-        }.sorted { $0.role < $1.role }
+            return RoleWinRate(role: role, games: matches.count, winRate: rate)
+        }.sorted { $0.games > $1.games }
 
         Chart {
             ForEach(stats) { entry in
-                BarMark(x: .value("Role", entry.role), y: .value("Win rate", entry.winRate))
+                // The game count rides on the label, so one lucky game can't
+                // pass for a 100% role, and 0% reads as 0% rather than no bar.
+                BarMark(x: .value("Role", "\(entry.role) (\(entry.games))"), y: .value("Win rate", entry.winRate))
                     .foregroundStyle(entry.winRate >= 50 ? Color.green.gradient : Color.red.gradient)
                     .cornerRadius(4)
+                    .annotation(position: .top) {
+                        Text("\(Int(entry.winRate.rounded()))%")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
             }
             RuleMark(y: .value("Even", 50))
                 .foregroundStyle(.secondary.opacity(0.4))

@@ -8,7 +8,7 @@ final class Match {
     var win: Bool
     var queueType: String
     /// Riot's raw queue id, kept alongside the display name so views can
-    /// branch on the actual mode (augment modes, ARAM, Arena) rather than
+    /// branch on the actual mode rather than
     /// string-matching the label.
     var queueId: Int = 0
     var gameDurationSeconds: Int
@@ -62,5 +62,25 @@ final class Match {
         self.timestamp = timestamp
         self.notes = notes
         self.tags = tags
+    }
+}
+
+extension Match {
+    /// Whose game this screen is about: the linked player in your own history,
+    /// or, on a copy browsed from someone's profile, that player — whose puuid
+    /// the copy's id carries (`browsed:<puuid>:<matchId>`).
+    var focusParticipant: MatchParticipantSummary? {
+        if let me = participants.first(where: \.isLinkedPlayer) { return me }
+        let parts = id.split(separator: ":")
+        guard parts.count == 3 else { return nil }
+        return participants.first { $0.puuid == parts[1] }
+    }
+
+    /// The server the game was played on, from Riot's match-id prefix
+    /// ("JP1_603518261" is .jp1), so a game browsed from another server's
+    /// player looks its players up there rather than on your own.
+    var platform: RiotPlatform? {
+        let riotID = id.split(separator: ":").last.map(String.init) ?? id
+        return riotID.split(separator: "_").first.flatMap { RiotPlatform(rawValue: $0.lowercased()) }
     }
 }

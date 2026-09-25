@@ -73,13 +73,7 @@ enum PerformanceScore {
     /// The score on the match's own performance card: the linked player's, or
     /// on a browsed game, the player whose history it was opened from.
     static func compute(for match: Match) -> Double? {
-        guard let stats = match.leagueStats,
-              let player = match.participants.first(where: \.isLinkedPlayer)
-                ?? match.participants.first(where: {
-                    $0.champion == stats.champion && $0.kills == stats.kills
-                        && $0.deaths == stats.deaths && $0.assists == stats.assists
-                })
-        else { return nil }
+        guard let player = match.focusParticipant else { return nil }
         return compute(for: player, in: match)
     }
 

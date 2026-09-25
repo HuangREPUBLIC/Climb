@@ -43,13 +43,44 @@ enum MatchImportService {
         storedKeyFingerprint != currentKeyFingerprint
     }
 
-    /// The most recently started sync. Every new sync waits for it first.
-    private static var lastSync: Task<Void, Error>?
+    /// Games Riot listed but won't serve (gone, or undecodable). Skipped for
+    /// the rest of the session so "load older" doesn't retry them every tap.
+    private static var unavailableIDs: Set<String> = []
+
+    /// The most recently started import. Every new one waits for it first.
+    private static var lastImport: Task<Void, Never>?
+
+    /// A browsed copy whose viewer can't be found in it — left by an older id
+    /// scheme — can never be looked up again, so it is dead weight.
+    private static func pruneOrphanedBrowsedCopies(context: ModelContext) {
+        guard let browsed = try? context.fetch(FetchDescriptor<Match>(predicate: #Predicate { !$0.isOwnHistory })) else { return }
+        for match in browsed where match.focusParticipant == nil {
+            context.delete(match)
+        }
+        try? context.save()
+    }
+
+    /// Runs imports one at a time, in call order.
+    ///
+    /// Launch, both pull-to-refreshes, the account sheet and "load older" can
+    /// all fire at once. Two overlapping imports each inserted the same
+    /// match's scoreboard, which doubled every team total and put a "19th" in
+    /// a ten-player game. Chaining here protects every caller at once.
+    private static func serialized<T: Sendable>(_ work: @escaping @MainActor () async throws -> T) async throws -> T {
+        let previous = lastImport
+        let task = Task { @MainActor in
+            await previous?.value
+            return try await work()
+        }
+        lastImport = Task { _ = await task.result }
+        return try await task.value
+    }
 
     /// Syncs on launch when something is stale — an import-logic bump, a key
-    /// change, or a timeline an earlier sync couldn't fetch — so the player
-    /// never has to know a backfill exists.
+    /// change, a timeline an earlier sync couldn't fetch — or the last sync is
+    /// over ten minutes old, the way 掌盟 and op.gg refresh when opened.
     static func refreshIfNeeded(context: ModelContext) async {
+        pruneOrphanedBrowsedCopies(context: context)
         guard let account = try? context.fetch(FetchDescriptor<LinkedAccount>()).first else { return }
 
         let current = currentDataVersion
@@ -58,7 +89,9 @@ enum MatchImportService {
         })
         stale.fetchLimit = 1
         let hasStale = account.syncedGames.contains(.league) && ((try? context.fetchCount(stale)) ?? 0) > 0
-        guard hasStale || apiKeyChangedSinceLastImport else { return }
+        let lastSync = max(account.lastLeagueSyncDate ?? .distantPast, account.lastTFTSyncDate ?? .distantPast)
+        let isOld = lastSync < .now.addingTimeInterval(-10 * 60)
+        guard hasStale || isOld || apiKeyChangedSinceLastImport else { return }
         try? await syncLinkedAccount(context: context)
     }
 
@@ -77,12 +110,6 @@ enum MatchImportService {
         )
     }
 
-    /// Runs syncs one at a time, in call order.
-    ///
-    /// Launch, both pull-to-refreshes and the account sheet can all fire at
-    /// once. Two overlapping imports each inserted the same match's scoreboard,
-    /// which doubled every team total and put a "19th" in a ten-player game.
-    /// Chaining here protects every caller at once.
     static func linkAndSync(
         gameName: String,
         tagLine: String,
@@ -90,9 +117,7 @@ enum MatchImportService {
         gamesToSync: Set<Game>,
         context: ModelContext
     ) async throws {
-        let previous = lastSync
-        let task = Task {
-            _ = await previous?.result
+        try await serialized {
             try await performSync(
                 gameName: gameName,
                 tagLine: tagLine,
@@ -101,8 +126,59 @@ enum MatchImportService {
                 context: context
             )
         }
-        lastSync = task
-        try await task.value
+    }
+
+    /// The next page of League history below what's stored — "load older" at
+    /// the foot of the match list. Returns how many games it added; 0 means
+    /// Riot has nothing older (or the rate limit stopped it first).
+    @discardableResult
+    static func loadOlderMatches(context: ModelContext) async throws -> Int {
+        try await serialized {
+            guard let account = try context.fetch(FetchDescriptor<LinkedAccount>()).first,
+                  let platform = RiotPlatform(rawValue: account.platform)
+            else { return 0 }
+            let region = platform.region
+            let client = RiotAPIClient.shared
+            let puuid = try await client.resolvePUUID(gameName: account.riotGameName, tagLine: account.riotTagline, region: region)
+            let known = Set(try context.fetch(FetchDescriptor<Match>(predicate: #Predicate { $0.isOwnHistory })).map(\.id))
+
+            // Walk Riot's list from the top and take the first games not yet
+            // stored. Offsetting by the stored count would skip any gap — more
+            // than 20 games between syncs, or another account's matches. IDs
+            // are one request per hundred, so the walk itself is cheap.
+            var newIDs: [String] = []
+            var start = 0
+            while newIDs.count < recentMatchCount {
+                let page = try await client.fetchRecentMatchIDs(puuid: puuid, region: region, start: start, count: 100)
+                newIDs += page.filter { !known.contains($0) && !unavailableIDs.contains($0) }
+                if page.count < 100 { break }
+                start += 100
+            }
+
+            var added = 0
+            var hitRateLimit = false
+            for matchID in newIDs.prefix(recentMatchCount) {
+                let complete: Bool
+                do {
+                    complete = try await importLeagueMatch(matchID, into: nil, client: client, puuid: puuid, region: region, context: context)
+                } catch RiotAPIError.rateLimited {
+                    hitRateLimit = true
+                    break
+                } catch RiotAPIError.network {
+                    hitRateLimit = true
+                    break
+                } catch {
+                    unavailableIDs.insert(matchID)
+                    continue
+                }
+                added += 1
+                if !complete { break }
+            }
+            try context.save()
+            // Nothing added because of the limit is not "no older games".
+            if added == 0, hitRateLimit { throw RiotAPIError.rateLimited }
+            return added
+        }
     }
 
     private static func performSync(
@@ -300,20 +376,42 @@ enum MatchImportService {
         return complete
     }
 
-    /// Prefix that keeps a browsed copy of a match from colliding with the
-    /// player's own copy of the same game — `Match.id` is `@Attribute(.unique)`.
-    static func browsedID(for matchID: String) -> String { "browsed:\(matchID)" }
+    /// Keeps a browsed copy from colliding with the player's own copy of the
+    /// same game (`Match.id` is unique), and one viewer's copy from another's:
+    /// the performance card belongs to whoever's profile it was opened from.
+    static func browsedID(for matchID: String, viewer: String) -> String {
+        "browsed:\(viewer):\(matchID)"
+    }
+
+    /// Another player's game as a full `Match`, from the cache when possible,
+    /// so their profile lists games with the same rows as your own and opening
+    /// one costs nothing more.
+    static func browsedMatch(
+        matchID: String,
+        viewedPuuid: String,
+        region: RiotRegion,
+        context: ModelContext
+    ) async throws -> Match? {
+        let id = browsedID(for: matchID, viewer: viewedPuuid)
+        var descriptor = FetchDescriptor<Match>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        if let cached = try? context.fetch(descriptor).first, cached.importVersion == currentDataVersion {
+            return cached
+        }
+        let detail = try await RiotAPIClient.shared.fetchMatch(matchID: matchID, region: region)
+        return browsedMatch(detail: detail, viewedPuuid: viewedPuuid, context: context)
+    }
 
     /// A browsable copy of another player's match, so their history opens the
     /// same way the player's own does. It is a cache: keyed so it never
     /// collides with real history, nobody in it is "you", and it skips the
     /// timeline call — the gold chart and head-to-head degrade gracefully.
-    static func browsedMatch(
+    private static func browsedMatch(
         detail: RiotMatchResponse,
         viewedPuuid: String,
         context: ModelContext
     ) -> Match? {
-        let id = browsedID(for: detail.metadata.matchId)
+        let id = browsedID(for: detail.metadata.matchId, viewer: viewedPuuid)
         var descriptor = FetchDescriptor<Match>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1
         let cached = try? context.fetch(descriptor).first
@@ -482,7 +580,6 @@ enum MatchImportService {
             subStyleID: participant.perks.subStyleID,
             statPerkIDs: participant.perks.statPerkIDs,
             champLevel: participant.champLevel ?? 0,
-            augmentIDs: participant.augmentIDs,
             isLinkedPlayer: isLinkedPlayer
         )
     }
@@ -689,14 +786,6 @@ enum MatchImportService {
         case 1810, 1820, 1830, 1840: return "Swarm"
         case 2300: return "Brawl"
         default: return "Queue \(queueId)"
-        }
-    }
-
-    /// True for modes that hand out augments instead of (or alongside) runes.
-    static func usesAugments(queueId: Int) -> Bool {
-        switch queueId {
-        case 1700, 1710, 2300, 2400: return true
-        default: return false
         }
     }
 

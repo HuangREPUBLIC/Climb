@@ -26,7 +26,7 @@ struct PlayerMatchupView: View {
     @ScaledMetric(relativeTo: .subheadline) private var assistedColumnWidth: CGFloat = 62
 
     private var linkedPlayer: MatchParticipantSummary? {
-        match.participants.first(where: \.isLinkedPlayer)
+        match.focusParticipant
     }
     private var linkedTeamId: Int { linkedPlayer?.teamId ?? 100 }
     private var allies: [MatchParticipantSummary] {

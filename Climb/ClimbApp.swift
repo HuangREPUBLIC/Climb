@@ -24,7 +24,8 @@ struct ClimbApp: App {
             MatchParticipantSummary.self,
             TeamStats.self,
             OpponentEncounter.self,
-            GoldTimelinePoint.self
+            GoldTimelinePoint.self,
+            SavedPlayer.self
         ])
     }
 }

@@ -1,50 +1,80 @@
 import SwiftUI
 import SwiftData
 
+/// The Matches tab (战绩): who you are, how you've been playing, and every
+/// synced game on one scroll, the way 掌盟 lays it out — rather than a profile
+/// previewing five games and a second tab listing the same ones again.
 struct ProfileView: View {
     @Query private var accounts: [LinkedAccount]
     @Query(sort: \Match.timestamp, order: .reverse) private var allMatches: [Match]
+    @AppStorage("selectedGame") private var selectedGame: Game = .league
     @State private var showingLinkAccount = false
-    @AppStorage("selectedGameFilter") private var selectedGameRaw = GameFilter.league.rawValue
+    @State private var queueFilter: String?
+    @State private var tagFilter: String?
+    @State private var isLoadingOlder = false
+    @State private var reachedEnd = false
+    @State private var olderLoadFailed = false
 
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.modelContext) private var modelContext
-
-
-    /// An iPad has room for more than the phone's five rows — filling that
-    /// space is the point of the extra width, not stretching five rows across
-    /// it and leaving the bottom half of the screen empty.
-    private var previewCount: Int { horizontalSizeClass == .regular ? 10 : 5 }
-
-    private var selectedGame: GameFilter {
-        get { GameFilter(rawValue: selectedGameRaw) ?? .league }
-        nonmutating set { selectedGameRaw = newValue.rawValue }
-    }
 
     private var account: LinkedAccount? { accounts.first }
     /// Everything on this screen follows the game switcher.
-    private var matches: [Match] { allMatches.filter { $0.game == selectedGame.game && $0.isOwnHistory } }
-    private var leagueMatches: [Match] { matches.filter { $0.leagueStats != nil } }
-    private var gamesWithMatches: Set<Game> { Set(allMatches.map(\.game)) }
-
-    /// Current solo-queue rank, used as the context label on match rows.
-    private var currentRankLabel: String {
-        guard let account, let tier = account.rankTier, let division = account.rankDivision else {
-            return "Unranked"
+    private var matches: [Match] { allMatches.filter { $0.game == selectedGame && $0.isOwnHistory } }
+    private var filteredMatches: [Match] {
+        matches.filter { match in
+            (queueFilter.map { match.queueType == $0 } ?? true)
+                && (tagFilter.map { match.tags.contains($0) } ?? true)
         }
-        return RankEmblemService.displayName(tier: tier, division: division)
+    }
+    /// Modes the player actually has games in, most played first.
+    private var queues: [String] {
+        Dictionary(grouping: matches, by: \.queueType)
+            .sorted { $0.value.count > $1.value.count }
+            .map(\.key)
+    }
+    private var tags: [String] {
+        var seen = Set<String>()
+        return matches.flatMap(\.tags).filter { seen.insert($0).inserted }.sorted()
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 16) {
                 header
 
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     unpublishedMatchNotice
-                    if !matches.isEmpty {
-                        summaryCard
-                        recentMatchesPreview
+                    if !matches.isEmpty { summaryCard }
+                }
+                .padding(.horizontal)
+
+                if queues.count > 1 {
+                    TagFilterBar(tags: queues, selection: $queueFilter)
+                        .padding(.vertical, -8)
+                }
+                if !tags.isEmpty {
+                    TagFilterBar(tags: tags, selection: $tagFilter)
+                        .padding(.vertical, -8)
+                }
+
+                Group {
+                    if matches.isEmpty {
+                        ContentUnavailableView(
+                            "No matches yet",
+                            systemImage: "gamecontroller",
+                            description: Text("Link a Riot account to import your match history.")
+                        )
+                    } else if filteredMatches.isEmpty {
+                        ContentUnavailableView(
+                            "No matches for this filter",
+                            systemImage: "line.3.horizontal.decrease",
+                            description: Text("Tap the selected filter again to clear it.")
+                        )
+                    } else {
+                        matchList
+                    }
+                    if selectedGame == .league, account != nil, !matches.isEmpty {
+                        loadOlderButton
                     }
                 }
                 .padding(.horizontal)
@@ -53,38 +83,18 @@ struct ProfileView: View {
             .readableContentWidth()
         }
         .background(Color(.systemGroupedBackground))
-        // The standard system gesture for "get the latest data," so refreshing
-        // no longer requires opening the sync sheet — a swipe down is a pattern
-        // every iOS user already knows from Mail, News and the App Store.
+        // The standard system gesture for "get the latest data".
         .refreshable { try? await MatchImportService.syncLinkedAccount(context: modelContext) }
-        .navigationTitle("Profile")
-        // Inline centres the title and removes the large-title block that sat
-        // above the banner — that gap was what made the square top edge read
-        // as disconnected from the rounded bottom.
+        .navigationTitle("Matches")
+        // Inline keeps the banner flush under the bar instead of a large-title
+        // block floating above it.
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Match.self) { match in
             MatchDetailView(match: match)
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                GameFilterPicker(
-                    selection: Binding(
-                        get: { selectedGame },
-                        set: { selectedGame = $0 }
-                    ),
-                    availableGames: gamesWithMatches
-                )
-            }
-            ToolbarItem(placement: .primaryAction) {
-                NavigationLink {
-                    FriendComparisonView()
-                } label: {
-                    Image(systemName: "person.2")
-                }
-                // An icon-only control has no visible text for VoiceOver to
-                // read, so without this it announces the SF Symbol's raw name
-                // ("person dot 2") rather than what the button does.
-                .accessibilityLabel("Compare with a friend")
+                GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game)))
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -98,14 +108,17 @@ struct ProfileView: View {
         .sheet(isPresented: $showingLinkAccount) {
             LinkAccountView()
         }
+        .onChange(of: selectedGame) {
+            queueFilter = nil
+            tagFilter = nil
+        }
     }
 
     // MARK: - Header
 
     /// The player's most-played champion, used as the banner's backdrop.
     private var bannerChampion: String? {
-        Dictionary(grouping: leagueMatches) { $0.leagueStats?.champion ?? "" }
-            .filter { !$0.key.isEmpty }
+        Dictionary(grouping: matches.compactMap(\.leagueStats?.champion)) { $0 }
             .max { $0.value.count < $1.value.count }?
             .key
     }
@@ -138,10 +151,8 @@ struct ProfileView: View {
     }
 
     /// Riot's match API can run behind the account itself — event queues in
-    /// particular have gone unpublished for hours at a time. Without saying so,
-    /// the app just shows a stale newest-match and reads as broken, which is
-    /// exactly the wrong conclusion: nothing here can fix it, and re-syncing
-    /// again will not help until Riot publishes the games.
+    /// particular go unpublished for hours. Without saying so the app shows a
+    /// stale newest match and reads as broken, when nothing here can fix it.
     ///
     /// `lastRiotActivityDate` comes from Summoner-V4's `revisionDate`, which is
     /// already fetched on every sync, so this costs no extra request.
@@ -175,38 +186,72 @@ struct ProfileView: View {
 
     // MARK: - Summary
 
+    /// Follows the filters, so picking "Ranked Solo/Duo" answers "how am I
+    /// doing in ranked" without a separate screen.
     private var summaryCard: some View {
-        let wins = leagueMatches.filter(\.win).count
-        let winRate = leagueMatches.isEmpty ? 0 : Double(wins) / Double(leagueMatches.count) * 100
+        let games = filteredMatches
+        let wins = games.filter { $0.tftStats.map { $0.placement <= 4 } ?? $0.win }.count
+        let winRate = games.isEmpty ? 0 : Double(wins) / Double(games.count) * 100
+        let lines = games.compactMap(\.leagueStats)
+        // Totals over totals, as op.gg does, so one 10/0/10 game can't pass
+        // for an average.
+        let kda = Double(lines.map { $0.kills + $0.assists }.reduce(0, +))
+            / Double(max(lines.map(\.deaths).reduce(0, +), 1))
+
         return StatSummaryCard(stats: [
-            .init(icon: "gamecontroller.fill", label: "Matches", value: "\(matches.count)"),
             .init(icon: "percent", tint: winRate >= 50 ? Theme.win : Theme.loss, label: "Win rate", value: "\(Int(winRate.rounded()))%"),
-            .init(icon: "trophy.fill", tint: .yellow, label: "Record", value: "\(wins)-\(leagueMatches.count - wins)")
+            lines.isEmpty
+                ? .init(icon: "gamecontroller.fill", label: "Games", value: "\(games.count)")
+                : .init(icon: "bolt.fill", label: "KDA", value: String(format: "%.2f", kda)),
+            .init(icon: "trophy.fill", tint: .yellow, label: "Record", value: "\(wins)W \(games.count - wins)L")
         ])
     }
 
-    // MARK: - Recent matches
+    // MARK: - Matches
 
-    private var recentMatchesPreview: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Recent Matches").font(.headline)
-
-            VStack(spacing: 0) {
-                ForEach(Array(matches.prefix(previewCount).enumerated()), id: \.element.id) { index, match in
-                    NavigationLink(value: match) {
-                        MatchRowView(match: match, rankLabel: currentRankLabel, showsChevron: true)
-                    }
-                    .buttonStyle(PressableButtonStyle())
-                    .denseRowScaling()
-                    if index < min(matches.count, previewCount) - 1 {
-                        Divider()
-                    }
+    private var matchList: some View {
+        LazyVStack(spacing: 0) {
+            ForEach(Array(filteredMatches.enumerated()), id: \.element.id) { index, match in
+                if index > 0 { Divider() }
+                NavigationLink(value: match) {
+                    MatchRowView(match: match)
                 }
+                .buttonStyle(PressableButtonStyle())
             }
-            .padding()
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .cardShadow()
         }
+        .cardSurface()
+    }
+
+    /// A button, not infinite scroll: each page costs ~40 requests against a
+    /// personal key's 100 per two minutes, so loading more is a deliberate act.
+    private var loadOlderButton: some View {
+        Button {
+            isLoadingOlder = true
+            Task {
+                do {
+                    let added = try await MatchImportService.loadOlderMatches(context: modelContext)
+                    reachedEnd = added == 0
+                    olderLoadFailed = false
+                } catch {
+                    // A rate limit isn't the end of history — offer a retry.
+                    olderLoadFailed = true
+                }
+                isLoadingOlder = false
+            }
+        } label: {
+            HStack(spacing: 8) {
+                if isLoadingOlder { ProgressView().controlSize(.small) }
+                Text(isLoadingOlder ? "Loading…"
+                     : olderLoadFailed ? "Couldn't load — tap to retry"
+                     : reachedEnd ? "No older matches found"
+                     : "Load older matches")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(Theme.accent)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .disabled(isLoadingOlder)
     }
 }

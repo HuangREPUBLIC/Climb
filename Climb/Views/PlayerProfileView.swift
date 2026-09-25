@@ -1,37 +1,47 @@
 import SwiftUI
 import SwiftData
 
-/// Another player's page, opening on their profile — same banner, stat cards
-/// and match rows as your own Profile tab — with paging through their full
-/// match history rather than a fixed handful.
+/// Another player's page: the same banner and summary as your own, their
+/// history with paging, and how they compare with you — the separate compare
+/// screen this replaced only ever showed that last part.
 struct PlayerProfileView: View {
-    let puuid: String
+    /// Nil when opened from a saved friend; resolved from the Riot ID then.
+    let puuid: String?
     let riotIdGameName: String
     let riotIdTagline: String
     let region: RiotRegion
     var platform: RiotPlatform?
 
+    @State private var resolvedPUUID: String?
     @State private var profile: OtherPlayerProfile?
-    @State private var matches: [OtherPlayerMatchSummary] = []
+    /// Cached `Match` copies of their games, so they list with the same rows
+    /// as your own history and open without another request.
+    @State private var matches: [Match] = []
+    /// Where the next page starts in Riot's id list — not `matches.count`,
+    /// since a game that failed to load still used up its slot.
+    @State private var nextStart = 0
     @State private var isLoading = true
     @State private var isLoadingMore = false
     @State private var reachedEnd = false
     @State private var errorMessage: String?
-    /// The other player's match, fetched and cached on demand when a row is
-    /// tapped. Drilling in from here reaches the same detail screen as your own
-    /// matches, whose scoreboard links to every participant's profile — so the
-    /// two screens form a loop you can keep following outward.
     @State private var browsedMatch: Match?
-    @State private var loadingMatchID: String?
 
     @Environment(\.modelContext) private var modelContext
+    @Query private var accounts: [LinkedAccount]
+    @Query(sort: \Match.timestamp, order: .reverse) private var allMatches: [Match]
+    @Query private var savedPlayers: [SavedPlayer]
 
     private let pageSize = 15
 
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var savedEntry: SavedPlayer? {
+        let key = SavedPlayer.key(gameName: riotIdGameName, tagLine: riotIdTagline)
+        return savedPlayers.first { $0.key == key }
+    }
+    private var isYou: Bool {
+        accounts.first.map { SavedPlayer.key(gameName: $0.riotGameName, tagLine: $0.riotTagline) }
+            == SavedPlayer.key(gameName: riotIdGameName, tagLine: riotIdTagline)
+    }
 
-    @ScaledMetric(relativeTo: .subheadline) private var rawPortraitSize: CGFloat = 44
-    private var portraitSize: CGFloat { rawPortraitSize.capped(at: 72) }
 
     var body: some View {
         ScrollView {
@@ -41,6 +51,7 @@ struct PlayerProfileView: View {
                 VStack(spacing: 20) {
                     if !matches.isEmpty {
                         summaryCard
+                        if !isYou, accounts.first != nil { compareCard }
                         matchesCard
                     } else if isLoading {
                         ProgressView().padding(.top, 40)
@@ -65,9 +76,39 @@ struct PlayerProfileView: View {
         .navigationDestination(item: $browsedMatch) { match in
             MatchDetailView(match: match)
         }
+        .toolbar {
+            if !isYou {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        toggleSaved()
+                    } label: {
+                        Image(systemName: savedEntry == nil ? "star" : "star.fill")
+                    }
+                    .accessibilityLabel(savedEntry == nil ? "Add to Friends" : "Remove from Friends")
+                }
+            }
+        }
+        .sensoryFeedback(.selection, trigger: savedEntry == nil)
         .task {
-            if let platform, profile == nil {
-                profile = await PlayerProfileService.profile(puuid: puuid, platform: platform)
+            if resolvedPUUID == nil {
+                do {
+                    if let puuid {
+                        resolvedPUUID = puuid
+                    } else {
+                        resolvedPUUID = try await RiotAPIClient.shared.resolvePUUID(
+                            gameName: riotIdGameName,
+                            tagLine: riotIdTagline,
+                            region: region
+                        )
+                    }
+                } catch {
+                    errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    isLoading = false
+                    return
+                }
+            }
+            if let platform, profile == nil, let resolvedPUUID {
+                profile = await PlayerProfileService.profile(puuid: resolvedPUUID, platform: platform)
             }
             await loadPage(reset: true)
         }
@@ -78,7 +119,7 @@ struct PlayerProfileView: View {
     /// The champion this player shows up on most, used as their banner.
     /// Same treatment as your own profile — see ProfileView.
     private var bannerChampion: String? {
-        Dictionary(grouping: matches, by: \.champion)
+        Dictionary(grouping: matches.compactMap(\.leagueStats?.champion)) { $0 }
             .max { $0.value.count < $1.value.count }?
             .key
     }
@@ -101,20 +142,91 @@ struct PlayerProfileView: View {
     // MARK: - Summary
 
     private var summaryCard: some View {
-        let wins = matches.filter(\.win).count
-        let winRate = matches.isEmpty ? 0 : Double(wins) / Double(matches.count) * 100
-        let avgKDA = matches.isEmpty ? 0 : matches.map(kdaValue).reduce(0, +) / Double(matches.count)
+        let stats = FriendComparisonService.aggregate(matches)
         return StatSummaryCard(stats: [
-            .init(icon: "gamecontroller.fill", label: "Loaded", value: "\(matches.count)"),
-            .init(icon: "percent", tint: winRate >= 50 ? Theme.win : Theme.loss, label: "Win rate", value: "\(Int(winRate.rounded()))%"),
-            .init(icon: "bolt.fill", label: "Avg KDA", value: String(format: "%.2f", avgKDA))
+            .init(icon: "gamecontroller.fill", label: "Games", value: "\(stats.gamesSampled)"),
+            .init(icon: "percent", tint: stats.winRate >= 50 ? Theme.win : Theme.loss, label: "Win rate", value: "\(Int(stats.winRate.rounded()))%"),
+            .init(icon: "bolt.fill", label: "KDA", value: String(format: "%.2f", stats.kda))
         ])
     }
 
-    private func kdaValue(_ match: OtherPlayerMatchSummary) -> Double {
-        match.deaths == 0
-            ? Double(match.kills + match.assists)
-            : Double(match.kills + match.assists) / Double(match.deaths)
+    /// Their loaded games against your last 20.
+    private var compareCard: some View {
+        let mine = FriendComparisonService.aggregate(Array(allMatches.filter { $0.isOwnHistory && $0.leagueStats != nil }.prefix(20)))
+        let theirs = FriendComparisonService.aggregate(matches)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("You").foregroundStyle(Theme.ally)
+                Spacer()
+                Text("vs").foregroundStyle(.secondary)
+                Spacer()
+                Text(riotIdGameName).foregroundStyle(Theme.enemy).lineLimit(1)
+            }
+            .font(.subheadline.weight(.semibold))
+
+            comparisonBar("Win rate", mine: mine.winRate, theirs: theirs.winRate) { "\(Int($0.rounded()))%" }
+            comparisonBar("KDA", mine: mine.kda, theirs: theirs.kda) { String(format: "%.2f", $0) }
+
+            HStack {
+                topChampion(mine.topChampion)
+                Spacer()
+                Text("Most played").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                topChampion(theirs.topChampion)
+            }
+        }
+        .cardSurface()
+    }
+
+    /// Values outside, label between, and a bar split by the two — "who is
+    /// ahead" is a glance rather than a subtraction.
+    private func comparisonBar(_ label: String, mine: Double, theirs: Double, display: (Double) -> String) -> some View {
+        let fraction = CGFloat(mine / max(mine + theirs, 0.0001))
+        return VStack(spacing: 5) {
+            HStack {
+                Text(display(mine))
+                    .fontWeight(mine > theirs ? .bold : .regular)
+                    .foregroundStyle(Theme.ally)
+                Spacer(minLength: 6)
+                Text(label).font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                Text(display(theirs))
+                    .fontWeight(theirs > mine ? .bold : .regular)
+                    .foregroundStyle(Theme.enemy)
+            }
+            .font(.subheadline.monospacedDigit())
+            GeometryReader { geo in
+                HStack(spacing: 2) {
+                    Theme.ally.frame(width: max(geo.size.width * fraction - 1, 0))
+                    Theme.enemy
+                }
+            }
+            .frame(height: 6)
+            .clipShape(Capsule())
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func topChampion(_ name: String?) -> some View {
+        if let name {
+            ChampionIconView(championName: name, size: 32)
+        } else {
+            Color.clear.frame(width: 32, height: 32)
+        }
+    }
+
+    private func toggleSaved() {
+        if let savedEntry {
+            modelContext.delete(savedEntry)
+        } else {
+            modelContext.insert(SavedPlayer(
+                gameName: riotIdGameName,
+                tagLine: riotIdTagline,
+                platform: (platform ?? accounts.first.flatMap { RiotPlatform(rawValue: $0.platform) })?.rawValue ?? ""
+            ))
+        }
     }
 
     // MARK: - Matches
@@ -123,27 +235,15 @@ struct PlayerProfileView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Match history").font(.headline)
 
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
                 ForEach(Array(matches.enumerated()), id: \.element.id) { index, match in
+                    if index > 0 { Divider() }
                     Button {
-                        open(match)
+                        browsedMatch = match
                     } label: {
-                        HStack(spacing: 8) {
-                            matchRow(match)
-                            if loadingMatchID == match.id {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .contentShape(Rectangle())
+                        MatchRowView(match: match)
                     }
                     .buttonStyle(PressableButtonStyle())
-                    .disabled(loadingMatchID != nil)
-                    .denseRowScaling()
-                    if index < matches.count - 1 { Divider() }
                 }
 
                 if !reachedEnd {
@@ -152,156 +252,75 @@ struct PlayerProfileView: View {
                         Task { await loadPage(reset: false) }
                     } label: {
                         HStack(spacing: 6) {
-                            if isLoadingMore {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Image(systemName: "arrow.down.circle")
-                            }
+                            if isLoadingMore { ProgressView().controlSize(.small) }
                             Text(isLoadingMore ? "Loading…" : "Load more")
                         }
-                        .font(.subheadline.weight(.medium))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                        .padding(.vertical, 12)
                     }
                     .buttonStyle(PressableButtonStyle())
                     .disabled(isLoadingMore)
                 }
             }
-            .padding()
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .cardShadow()
+            .cardSurface()
         }
-    }
-
-    /// Same two-row shape as MatchRowView so all three match lists in the app
-    /// (Profile, Matches, another player's profile) read identically.
-    private func matchRow(_ match: OtherPlayerMatchSummary) -> some View {
-        let outcome = Text(match.win ? "Victory" : "Defeat")
-            .font(.subheadline.weight(.bold))
-            .foregroundStyle(match.win ? Theme.win : Theme.loss)
-
-        // Concatenated at accessibility sizes — see MatchRowView: five
-        // separate views each shrink independently and the kills truncate
-        // first. The normal path keeps the original spaced row.
-        let kda = (Text("\(match.kills)")
-            + Text("/").foregroundStyle(.tertiary)
-            + Text("\(match.deaths)").foregroundStyle(.red)
-            + Text("/").foregroundStyle(.tertiary)
-            + Text("\(match.assists)"))
-            .font(.subheadline.weight(.semibold).monospacedDigit())
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
-            .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
-            .accessibilityLabel("\(match.kills) kills, \(match.deaths) deaths, \(match.assists) assists")
-
-        return HStack(alignment: .center, spacing: 12) {
-            ChampionIconView(championName: match.champion, size: portraitSize)
-
-            VStack(alignment: .leading, spacing: 4) {
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(alignment: .leading, spacing: 4) { outcome; kda }
-                } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        outcome
-                        Spacer(minLength: 4)
-                        kda
-                    }
-                }
-
-                // See MatchRowView: one line normally, stacked only at
-                // accessibility sizes.
-                Group {
-                    if dynamicTypeSize.isAccessibilitySize {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(subtitle(for: match))
-                            Text(match.timestamp, format: Self.timestampFormat)
-                        }
-                    } else {
-                        HStack(spacing: 5) {
-                            Text(subtitle(for: match))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Spacer(minLength: 6)
-                            Text(match.timestamp, format: Self.timestampFormat)
-                                .fixedSize()
-                        }
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 5)
-    }
-
-    private static let timestampFormat = Date.FormatStyle()
-        .month(.abbreviated)
-        .day()
-        .hour(.defaultDigits(amPM: .abbreviated))
-        .minute()
-
-    /// Mode | rank, matching MatchRowView. The rank is this player's current
-    /// tier (Riot exposes no per-match tier).
-    private func subtitle(for match: OtherPlayerMatchSummary) -> String {
-        var parts = [match.queueType]
-        if let tier = profile?.rankTier, let division = profile?.rankDivision {
-            parts.append(RankEmblemService.displayName(tier: tier, division: division))
-        } else if profile != nil {
-            parts.append("Unranked")
-        }
-        return parts.joined(separator: " | ")
     }
 
     // MARK: - Loading
 
-    /// Riot's match detail is fetched on demand rather than kept from the list
-    /// load: `recentMatches` already downloads the full detail for every row
-    /// and discards all but one participant, but holding fifteen full matches
-    /// in memory to serve a tap that may never come is the wrong trade. The
-    /// second visit to a match is free — `browsedMatch` returns the cached row.
-    private func open(_ summary: OtherPlayerMatchSummary) {
-        guard loadingMatchID == nil else { return }
-        loadingMatchID = summary.id
-        Task {
-            defer { loadingMatchID = nil }
-            guard let detail = try? await RiotAPIClient.shared.fetchMatch(
-                matchID: summary.id,
-                region: region
-            ) else {
-                errorMessage = "Couldn't load that match. Riot's API may be rate limiting."
-                return
-            }
-            browsedMatch = MatchImportService.browsedMatch(
-                detail: detail,
-                viewedPuuid: puuid,
-                context: modelContext
-            )
-        }
-    }
-
+    /// Each game is fetched once and kept as a cached `Match`, so the row can
+    /// show the full build and the detail screen opens instantly. A revisit
+    /// costs one id-list request.
     private func loadPage(reset: Bool) async {
+        guard let puuid = resolvedPUUID else { return }
         if reset {
             isLoading = true
         } else {
             isLoadingMore = true
         }
+        defer {
+            isLoading = false
+            isLoadingMore = false
+        }
 
         do {
-            let page = try await PlayerProfileService.recentMatches(
-                puuid: puuid,
-                region: region,
-                start: reset ? 0 : matches.count,
-                count: pageSize
-            )
-            if reset { matches = page } else { matches.append(contentsOf: page) }
+            let pageStart = reset ? 0 : nextStart
+            let ids = try await RiotAPIClient.shared.fetchRecentMatchIDs(puuid: puuid, region: region, start: pageStart, count: pageSize)
+            nextStart = pageStart + ids.count
             // A short page means Riot has no more history to give.
-            if page.count < pageSize { reachedEnd = true }
+            if ids.count < pageSize { reachedEnd = true }
+
+            var page: [Match] = []
+            for (index, matchID) in ids.enumerated() {
+                do {
+                    if let match = try await MatchImportService.browsedMatch(
+                        matchID: matchID,
+                        viewedPuuid: puuid,
+                        region: region,
+                        context: modelContext
+                    ), !page.contains(match), reset || !matches.contains(match) {
+                        // Riot's list shifts when they finish a game between
+                        // pages; the same game must not list twice.
+                        page.append(match)
+                    }
+                } catch RiotAPIError.rateLimited {
+                    // Keep what loaded; "Load more" resumes at this game.
+                    nextStart = pageStart + index
+                    reachedEnd = false
+                    if page.isEmpty {
+                        errorMessage = RiotAPIError.rateLimited.errorDescription
+                    }
+                    break
+                } catch {
+                    continue
+                }
+            }
+            // A reset that came back empty (rate limited) keeps what was shown.
+            if reset, !page.isEmpty || matches.isEmpty { matches = page } else if !reset { matches += page }
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
-
-        isLoading = false
-        isLoadingMore = false
     }
 }

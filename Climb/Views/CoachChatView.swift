@@ -78,6 +78,8 @@ struct CoachChatView: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("AI Coach")
+        // A conversation wants the full height for the input bar.
+        .toolbar(.hidden, for: .tabBar)
         .navigationBarTitleDisplayMode(.inline)
         .task {
             conversation = CoachService.conversation(for: match, context: modelContext)

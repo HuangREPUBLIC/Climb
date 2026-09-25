@@ -110,21 +110,6 @@ struct RiotMatchResponse: Decodable {
         let wardsKilled: Int?
         let largestMultiKill: Int?
         let champLevel: Int?
-        // Arena / Brawl / ARAM: Mayhem augment picks. Zero when unused, and
-        // absent entirely on older matches.
-        let playerAugment1: Int?
-        let playerAugment2: Int?
-        let playerAugment3: Int?
-        let playerAugment4: Int?
-        let playerAugment5: Int?
-        let playerAugment6: Int?
-
-        var augmentIDs: [Int] {
-            [playerAugment1, playerAugment2, playerAugment3,
-             playerAugment4, playerAugment5, playerAugment6]
-                .compactMap { $0 }
-                .filter { $0 != 0 }
-        }
 
         var items: [Int] {
             [item0, item1, item2, item3, item4, item5, item6]

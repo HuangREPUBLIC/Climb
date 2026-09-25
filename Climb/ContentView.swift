@@ -14,30 +14,22 @@ struct ContentView: View {
     /// The tab and the Matches stack are owned here rather than inside each
     /// screen, because a tapped notification has to be able to switch tabs and
     /// push a destination from outside any of them.
-    @State private var selectedTab: Tab = .profile
+    @State private var selectedTab: Tab = .matches
     @State private var matchPath = NavigationPath()
 
     @ObservedObject private var router = NotificationRouter.shared
 
     private enum Tab {
-        case profile, matches, stats
+        case matches, stats, search
     }
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack {
+            NavigationStack(path: $matchPath) {
                 ProfileView()
             }
             .tabItem {
-                Label("Profile", systemImage: "person.crop.circle")
-            }
-            .tag(Tab.profile)
-
-            NavigationStack(path: $matchPath) {
-                MatchListView()
-            }
-            .tabItem {
-                Label("Matches", systemImage: "list.bullet")
+                Label("Matches", systemImage: "list.bullet.rectangle.portrait")
             }
             .tag(Tab.matches)
 
@@ -48,6 +40,14 @@ struct ContentView: View {
                 Label("Stats", systemImage: "chart.line.uptrend.xyaxis")
             }
             .tag(Tab.stats)
+
+            NavigationStack {
+                SearchView()
+            }
+            .tabItem {
+                Label("Search", systemImage: "magnifyingglass")
+            }
+            .tag(Tab.search)
         }
         .task {
             NotificationRouter.shared.start()
@@ -90,5 +90,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: Match.self, inMemory: true)
+        .modelContainer(for: [Match.self, LinkedAccount.self, SavedPlayer.self], inMemory: true)
 }

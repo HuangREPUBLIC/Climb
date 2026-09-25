@@ -36,7 +36,7 @@ struct TeamComparisonView: View {
     @ScaledMetric(relativeTo: .caption2) private var ribbonHeight: CGFloat = 18
 
     private var linkedTeamId: Int {
-        match.participants.first(where: \.isLinkedPlayer)?.teamId ?? 100
+        match.focusParticipant?.teamId ?? 100
     }
     private var allyTeam: [MatchParticipantSummary] { match.participants.filter { $0.teamId == linkedTeamId } }
     private var enemyTeam: [MatchParticipantSummary] { match.participants.filter { $0.teamId != linkedTeamId } }

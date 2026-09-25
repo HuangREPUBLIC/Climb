@@ -40,8 +40,6 @@ final class MatchParticipantSummary {
     /// Offence, flex and defence shard, in that order — Riot's own row order.
     var statPerkIDs: [Int] = []
     var champLevel: Int = 0
-    /// Augment picks for modes that use them (Arena, Brawl, ARAM: Mayhem).
-    var augmentIDs: [Int] = []
     var isLinkedPlayer: Bool
 
     var match: Match?
@@ -77,7 +75,6 @@ final class MatchParticipantSummary {
         subStyleID: Int = 0,
         statPerkIDs: [Int] = [],
         champLevel: Int = 0,
-        augmentIDs: [Int] = [],
         isLinkedPlayer: Bool
     ) {
         self.puuid = puuid
@@ -110,7 +107,6 @@ final class MatchParticipantSummary {
         self.subStyleID = subStyleID
         self.statPerkIDs = statPerkIDs
         self.champLevel = champLevel
-        self.augmentIDs = augmentIDs
         self.isLinkedPlayer = isLinkedPlayer
     }
 }

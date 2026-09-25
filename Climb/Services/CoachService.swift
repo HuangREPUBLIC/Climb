@@ -88,7 +88,9 @@ enum CoachService {
             lines.append("Player tagged this match: \(match.tags.joined(separator: ", ")).")
         }
 
-        let recentLeague = allMatches.filter { $0.leagueStats != nil }.prefix(10)
+        // Browsed copies of other players' games live in the same store.
+        let ownMatches = allMatches.filter(\.isOwnHistory)
+        let recentLeague = ownMatches.filter { $0.leagueStats != nil }.prefix(10)
         if !recentLeague.isEmpty {
             let wins = recentLeague.filter(\.win).count
             lines.append("Recent League form (last \(recentLeague.count)): \(wins)W-\(recentLeague.count - wins)L.")
@@ -98,7 +100,7 @@ enum CoachService {
         // — "Tilted" on six of the last twenty — is exactly the kind of pattern
         // the coach should be allowed to name, and it can only come from here.
         var tagCounts: [String: Int] = [:]
-        for match in allMatches.prefix(20) {
+        for match in ownMatches.prefix(20) {
             for tag in match.tags { tagCounts[tag, default: 0] += 1 }
         }
         if !tagCounts.isEmpty {
