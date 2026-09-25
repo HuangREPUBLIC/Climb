@@ -48,7 +48,9 @@ struct CoachReply {
     }
 
     private static func actionBody(of line: String) -> String? {
-        for prefix in ["Try:", "Next game:", "Try next game:", "Action:"] {
+        // The model is told to keep "Try:" in any language, but a Chinese
+        // reply sometimes translates it anyway.
+        for prefix in ["Try:", "Next game:", "Try next game:", "Action:", "建议：", "建议:", "尝试：", "尝试:", "下局："] {
             if line.lowercased().hasPrefix(prefix.lowercased()) {
                 return String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
             }

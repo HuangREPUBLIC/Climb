@@ -6,6 +6,7 @@ enum AICoachError: LocalizedError {
     case requestFailed(Int)
     case emptyResponse
     case decoding(Error)
+    case notYourGame
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +20,8 @@ enum AICoachError: LocalizedError {
             return "The AI coach didn't return a response."
         case .decoding:
             return "Couldn't read the AI coach's response."
+        case .notYourGame:
+            return "The AI coach only reviews your own games."
         }
     }
 }

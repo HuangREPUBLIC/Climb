@@ -22,6 +22,9 @@ final class Match {
     /// cache of someone else's game, so they are excluded from every list that
     /// means "games I played" — the match list, the profile, and the stats.
     var isOwnHistory: Bool = true
+    /// The AI review card's text, generated once when the match is first
+    /// opened (see `CoachService.review`).
+    var reviewText: String?
 
     @Relationship(deleteRule: .cascade, inverse: \LeagueStats.match)
     var leagueStats: LeagueStats?

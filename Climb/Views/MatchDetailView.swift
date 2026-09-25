@@ -52,7 +52,9 @@ struct MatchDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 header
-                    .overlay(alignment: .topTrailing) { coachButton }
+                    .overlay(alignment: .topTrailing) {
+                        if match.isOwnHistory { coachButton }
+                    }
 
                 VStack(alignment: .leading, spacing: 16) {
                     if let stats = match.tftStats {
@@ -60,6 +62,9 @@ struct MatchDetailView: View {
                     }
 
                     if !match.participants.isEmpty {
+                        if match.isOwnHistory, match.leagueStats != nil {
+                            MatchReviewCard(match: match, allMatches: allMatches)
+                        }
                         tabPicker
                         tabContent
                     } else if let stats = match.leagueStats {

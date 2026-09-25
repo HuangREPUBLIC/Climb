@@ -371,6 +371,9 @@ enum MatchImportService {
 
         let match = existing ?? newMatch(id: matchID, game: .league)
         if existing == nil { context.insert(match) }
+        // A review written without the timeline never saw the gold curve or
+        // the head-to-head; let it be rewritten now that they exist.
+        if timeline != nil, existing?.goldTimeline.isEmpty == true { match.reviewText = nil }
         populate(match, from: detail, focus: puuid, linkedPUUID: puuid, timeline: timeline, context: context)
         match.importVersion = complete ? currentDataVersion : 0
         return complete
