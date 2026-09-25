@@ -15,7 +15,9 @@ final class Match {
     var timestamp: Date
     var notes: String
     var tags: [String]
-    var isMockData: Bool = false
+    /// `MatchImportService.currentDataVersion` of the import that built this
+    /// match's scoreboard. Anything lower is rebuilt in place on the next sync.
+    var importVersion: Int = 0
     /// False for a match browsed from another player's profile. Those are a
     /// cache of someone else's game, so they are excluded from every list that
     /// means "games I played" — the match list, the profile, and the stats.
@@ -26,9 +28,6 @@ final class Match {
 
     @Relationship(deleteRule: .cascade, inverse: \TFTStats.match)
     var tftStats: TFTStats?
-
-    @Relationship(deleteRule: .cascade, inverse: \ValorantStats.match)
-    var valorantStats: ValorantStats?
 
     @Relationship(deleteRule: .cascade, inverse: \CoachConversation.match)
     var coachConversation: CoachConversation?
@@ -53,8 +52,7 @@ final class Match {
         gameDurationSeconds: Int,
         timestamp: Date,
         notes: String = "",
-        tags: [String] = [],
-        isMockData: Bool = false
+        tags: [String] = []
     ) {
         self.id = id
         self.game = game
@@ -64,6 +62,5 @@ final class Match {
         self.timestamp = timestamp
         self.notes = notes
         self.tags = tags
-        self.isMockData = isMockData
     }
 }

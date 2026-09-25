@@ -192,8 +192,6 @@ struct LinkAccountView: View {
                 lastSync: existingAccount?.lastTFTSyncDate,
                 isOn: $syncTFT
             )
-            Divider()
-            unavailableGameRow
         }
         .cardSurface()
     }
@@ -231,33 +229,6 @@ struct LinkAccountView: View {
         }
         .buttonStyle(PressableButtonStyle())
         .accessibilityAddTraits(isOn.wrappedValue ? [.isSelected] : [])
-    }
-
-    /// Shown rather than hidden: the player can see VALORANT under the same
-    /// Riot account, so silently omitting it reads as a missing feature. The
-    /// reason it is off is stated in the row itself instead of a form footer.
-    private var unavailableGameRow: some View {
-        HStack(spacing: 12) {
-            gameIcon(.valorant, tint: .secondary)
-                .opacity(0.5)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(Game.valorant.rawValue)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("Riot's match endpoints for VALORANT need a production API key, which a personal key doesn't grant.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            Image(systemName: "lock.fill")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("VALORANT, unavailable. Riot's match endpoints for VALORANT need a production API key.")
     }
 
     private func gameIcon(_ game: Game, tint: Color) -> some View {

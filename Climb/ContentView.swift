@@ -51,7 +51,9 @@ struct ContentView: View {
         }
         .task {
             NotificationRouter.shared.start()
-            MockData.seedIfNeeded(context: modelContext)
+            #if DEBUG
+            PerformanceScore.selfCheck()
+            #endif
             // Notification permission is requested in context — right before the
             // first reflection reminder is actually scheduled, in
             // NotificationService.scheduleReflectionReminder — rather than here

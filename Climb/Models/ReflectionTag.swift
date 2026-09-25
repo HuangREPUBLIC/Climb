@@ -18,8 +18,6 @@ enum ReflectionTag {
             return league
         case .tft:
             return tft
-        case .valorant:
-            return valorant
         }
     }
 
@@ -50,16 +48,6 @@ enum ReflectionTag {
         "Lowroll",
         "Contested",
         "Tilted"
-    ]
-
-    private static let valorant = [
-        "Good aim day",
-        "Bad aim day",
-        "Poor util usage",
-        "Bad positioning",
-        "Good comms",
-        "Tilted",
-        "Team diff"
     ]
 
     /// Suggestions for `game`, plus anything the player has already invented,

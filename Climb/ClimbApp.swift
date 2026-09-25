@@ -19,7 +19,6 @@ struct ClimbApp: App {
             Match.self,
             LeagueStats.self,
             TFTStats.self,
-            ValorantStats.self,
             CoachConversation.self,
             ChatMessage.self,
             MatchParticipantSummary.self,

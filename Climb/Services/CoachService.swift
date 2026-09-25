@@ -29,12 +29,22 @@ enum CoachService {
         context.insert(playerMessage)
         try? context.save()
 
-        let systemPrompt = buildSystemPrompt(for: match, allMatches: allMatches)
-        let reply = try await AICoachClient.shared.send(
-            systemPrompt: systemPrompt,
-            history: historyBeforeReply,
-            newUserMessage: userMessage
-        )
+        let systemPrompt = await buildSystemPrompt(for: match, allMatches: allMatches)
+        let reply: String
+        do {
+            reply = try await AICoachClient.shared.send(
+                systemPrompt: systemPrompt,
+                history: historyBeforeReply,
+                newUserMessage: userMessage
+            )
+        } catch {
+            // An unanswered question left in the history reads as though the
+            // coach ignored it, and would be resent as context next time.
+            conversation.messages.removeAll { $0 === playerMessage }
+            context.delete(playerMessage)
+            try? context.save()
+            throw error
+        }
 
         let coachMessage = ChatMessage(role: .coach, text: reply)
         coachMessage.conversation = conversation
@@ -43,7 +53,7 @@ enum CoachService {
         try? context.save()
     }
 
-    private static func buildSystemPrompt(for match: Match, allMatches: [Match]) -> String {
+    private static func buildSystemPrompt(for match: Match, allMatches: [Match]) async -> String {
         var lines = [
             "You are Climb's AI coach, a supportive but honest coach for League of Legends and TFT.",
             "Ground every answer in the player's own stats below — never give generic strategy advice.",
@@ -59,6 +69,13 @@ enum CoachService {
 
         if let stats = match.leagueStats {
             lines.append("This match: \(stats.champion) (\(stats.role)), KDA \(stats.kills)/\(stats.deaths)/\(stats.assists), CS \(stats.creepScore), \(match.win ? "won" : "lost").")
+            var itemNames: [String] = []
+            for id in stats.items where id != 0 {
+                if let name = await DataDragonService.shared.itemInfo(for: id)?.name { itemNames.append(name) }
+            }
+            if !itemNames.isEmpty {
+                lines.append("Final items: \(itemNames.joined(separator: ", ")).")
+            }
         } else if let stats = match.tftStats {
             lines.append("This match: TFT, placed #\(stats.placement), level \(stats.level), traits: \(stats.traits.joined(separator: ", ")).")
         }

@@ -39,18 +39,7 @@ actor AICoachClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw AICoachError.network(error)
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw AICoachError.requestFailed(code)
-        }
+        let data = try await perform(request)
 
         do {
             let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
@@ -63,6 +52,29 @@ actor AICoachClient {
         } catch {
             throw AICoachError.decoding(error)
         }
+    }
+
+    /// Gemini's free tier answers 503 ("high demand") or 429 in bursts that
+    /// clear within seconds, so one delayed retry turns most of those failures
+    /// into a normal reply.
+    private func perform(_ request: URLRequest) async throws -> Data {
+        for attempt in 0..<2 {
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch {
+                throw AICoachError.network(error)
+            }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if (200..<300).contains(code) { return data }
+            if attempt == 0, code == 503 || code == 429 {
+                try await Task.sleep(for: .seconds(2))
+                continue
+            }
+            throw AICoachError.requestFailed(code)
+        }
+        throw AICoachError.requestFailed(0)
     }
 
     private struct ChatCompletionResponse: Decodable {

@@ -71,7 +71,7 @@ enum PlayerProfileService {
                         deaths: participant.deaths,
                         assists: participant.assists,
                         win: participant.win,
-                        queueType: queueTypeName(for: detail.info.queueId),
+                        queueType: MatchImportService.queueTypeName(for: detail.info.queueId),
                         timestamp: Date(timeIntervalSince1970: Double(detail.info.gameCreation) / 1000)
                     )
                 )
@@ -82,11 +82,5 @@ enum PlayerProfileService {
             }
         }
         return summaries
-    }
-
-    /// Shared with the importer so another player's matches show the same
-    /// mode names as your own instead of a stale five-entry table.
-    private static func queueTypeName(for queueId: Int) -> String {
-        MatchImportService.queueTypeName(for: queueId)
     }
 }

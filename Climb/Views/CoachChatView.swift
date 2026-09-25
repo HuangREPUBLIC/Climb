@@ -295,6 +295,8 @@ struct CoachChatView: View {
                 )
             } catch {
                 errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                // Hand the question back so a retry is one tap, not retyping.
+                if draft.isEmpty { draft = text }
             }
             isSending = false
         }

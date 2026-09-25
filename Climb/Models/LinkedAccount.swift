@@ -21,13 +21,6 @@ final class LinkedAccount {
     /// unpublished-match gap apart from an app that simply hasn't synced.
     var lastRiotActivityDate: Date?
     var lastTFTSyncDate: Date?
-    var lastValorantSyncDate: Date?
-
-    /// Which version of the import logic produced this account's stored
-    /// matches. When it trails `MatchImportService.currentDataVersion`, the
-    /// app re-imports automatically instead of leaving the user staring at
-    /// blank fields that only a manual re-sync would ever fill.
-    var dataSchemaVersion: Int = 0
 
     init(
         riotGameName: String,
@@ -54,7 +47,6 @@ final class LinkedAccount {
         switch game {
         case .league: return lastLeagueSyncDate
         case .tft: return lastTFTSyncDate
-        case .valorant: return lastValorantSyncDate
         }
     }
 }

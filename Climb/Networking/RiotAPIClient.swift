@@ -17,39 +17,12 @@ actor RiotAPIClient {
         return response.puuid
     }
 
-    /// Riot caps `count` at 100 (it 400s on anything larger), so a single call
-    /// can never return more than one page.
-    static let maxMatchIDPageSize = 100
-
-    func fetchRecentMatchIDs(puuid: String, region: RiotRegion, start: Int = 0, count: Int = 100) async throws -> [String] {
-        let pageSize = min(count, Self.maxMatchIDPageSize)
-        guard let url = URL(string: "https://\(region.rawValue).api.riotgames.com/lol/match/v5/matches/by-puuid/\(puuid)/ids?start=\(start)&count=\(pageSize)") else {
+    /// Riot caps `count` at 100 (it 400s on anything larger).
+    func fetchRecentMatchIDs(puuid: String, region: RiotRegion, start: Int = 0, count: Int = 20) async throws -> [String] {
+        guard let url = URL(string: "https://\(region.rawValue).api.riotgames.com/lol/match/v5/matches/by-puuid/\(puuid)/ids?start=\(start)&count=\(min(count, 100))") else {
             throw RiotAPIError.unexpectedStatus(0)
         }
         return try await get(url)
-    }
-
-    /// Walks the pages until Riot stops returning IDs, which is how you get a
-    /// player's whole retained history rather than just the first page.
-    /// `limit` is a safety stop, not an expected ceiling.
-    func fetchAllMatchIDs(puuid: String, region: RiotRegion, limit: Int = 1000) async throws -> [String] {
-        var all: [String] = []
-        var start = 0
-
-        while all.count < limit {
-            let page = try await fetchRecentMatchIDs(
-                puuid: puuid,
-                region: region,
-                start: start,
-                count: Self.maxMatchIDPageSize
-            )
-            all.append(contentsOf: page)
-            // A short page means there is nothing after it.
-            if page.count < Self.maxMatchIDPageSize { break }
-            start += page.count
-        }
-
-        return all
     }
 
     func fetchMatch(matchID: String, region: RiotRegion) async throws -> RiotMatchResponse {
@@ -80,7 +53,7 @@ actor RiotAPIClient {
         return try await get(url)
     }
 
-    func fetchRecentTFTMatchIDs(puuid: String, region: RiotRegion, count: Int = 50) async throws -> [String] {
+    func fetchRecentTFTMatchIDs(puuid: String, region: RiotRegion, count: Int = 20) async throws -> [String] {
         guard let url = URL(string: "https://\(region.rawValue).api.riotgames.com/tft/match/v1/matches/by-puuid/\(puuid)/ids?count=\(count)") else {
             throw RiotAPIError.unexpectedStatus(0)
         }

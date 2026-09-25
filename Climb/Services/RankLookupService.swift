@@ -17,8 +17,4 @@ enum RankLookupService {
         else { return nil }
         return SoloRank(tier: solo.tier, division: solo.rank)
     }
-
-    static func fetchSoloTier(puuid: String, platform: RiotPlatform) async -> String? {
-        await fetchSoloRank(puuid: puuid, platform: platform)?.tier
-    }
 }
