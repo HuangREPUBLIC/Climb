@@ -50,11 +50,24 @@ enum MatchImportService {
     /// The most recently started import. Every new one waits for it first.
     private static var lastImport: Task<Void, Never>?
 
-    /// A browsed copy whose viewer can't be found in it — left by an older id
-    /// scheme — can never be looked up again, so it is dead weight.
-    private static func pruneOrphanedBrowsedCopies(context: ModelContext) {
-        guard let browsed = try? context.fetch(FetchDescriptor<Match>(predicate: #Predicate { !$0.isOwnHistory })) else { return }
-        for match in browsed where match.focusParticipant == nil {
+    /// How many of other players' games to keep. About ten profiles' worth.
+    static let browsedCacheLimit = 150
+
+    /// Other players' games are only a cache — reopening a profile fetches
+    /// whatever is gone — so keep the newest `browsedCacheLimit`, and drop any
+    /// copy whose viewer can't be found in it (an older id scheme), which can
+    /// never be looked up again.
+    ///
+    /// ponytail: newest by game date, not by when it was last opened; a friend
+    /// who hasn't played in a while gets re-fetched. Track a last-viewed date if
+    /// that starts to cost requests.
+    private static func pruneBrowsedCopies(context: ModelContext) {
+        let descriptor = FetchDescriptor<Match>(
+            predicate: #Predicate { !$0.isOwnHistory },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        guard let browsed = try? context.fetch(descriptor) else { return }
+        for (index, match) in browsed.enumerated() where index >= browsedCacheLimit || match.focusParticipant == nil {
             context.delete(match)
         }
         try? context.save()
@@ -80,7 +93,7 @@ enum MatchImportService {
     /// change, a timeline an earlier sync couldn't fetch — or the last sync is
     /// over ten minutes old, the way 掌盟 and op.gg refresh when opened.
     static func refreshIfNeeded(context: ModelContext) async {
-        pruneOrphanedBrowsedCopies(context: context)
+        pruneBrowsedCopies(context: context)
         guard let account = try? context.fetch(FetchDescriptor<LinkedAccount>()).first else { return }
 
         let current = currentDataVersion

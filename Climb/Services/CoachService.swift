@@ -274,11 +274,19 @@ enum CoachService {
                 }
             }
             if let opponent = laneOpponentChampion {
-                let key = { (name: String) in name.lowercased().filter(\.isLetter) }
-                let counters = (meta.strongCounters ?? []) + (meta.weakCounters ?? [])
+                // Riot says "MonkeyKing", op.gg says "Wukong": compare ids.
+                let dataDragon = DataDragonService.shared
+                let opponentID = await dataDragon.resolvedChampionID(for: opponent)
+                var duel: ChampionAnalysis.Counter?
+                for counter in (meta.strongCounters ?? []) + (meta.weakCounters ?? []) {
+                    if await dataDragon.resolvedChampionID(for: counter.championName) == opponentID {
+                        duel = counter
+                        break
+                    }
+                }
                 // A handful of games is noise, not a matchup.
-                if let duel = counters.first(where: { key($0.championName) == key(opponent) }), duel.play >= 50 {
-                    lines.append("op.gg: \(champion) wins \(Int((duel.myWinRate * 100).rounded()))% of \(duel.play) games against \(opponent) in this lane this patch.")
+                if let duel, duel.play >= 50 {
+                    lines.append("op.gg: \(champion) wins \(Int((duel.myWinRate * 100).rounded()))% of \(duel.play) games against \(duel.championName) in this lane this patch.")
                 }
             }
         }

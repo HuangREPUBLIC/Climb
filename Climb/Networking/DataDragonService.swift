@@ -53,7 +53,10 @@ actor DataDragonService {
     // icon request on first launch would each fetch the ~700KB champion.json.
     private var championIDsTask: Task<Void, Never>?
 
-    private func resolvedChampionID(for championName: String) async -> String {
+    /// Any spelling of a champion — Riot's id ("MonkeyKing"), op.gg's display
+    /// name ("Wukong", "Nunu & Willump") — to its one Data Dragon id, so
+    /// names from different sources can be compared.
+    func resolvedChampionID(for championName: String) async -> String {
         let fallback = Self.dataDragonID(for: championName)
         if championIDsByLowercaseKey.isEmpty {
             await loadChampionIDs()
