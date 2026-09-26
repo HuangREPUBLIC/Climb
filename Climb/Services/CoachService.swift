@@ -179,6 +179,9 @@ enum CoachService {
         // Everything is read before the one `await` (item names, at the end):
         // a launch rebuild may replace these rows while that lookup runs.
         let itemIDs = stats.items.filter { $0 != 0 }
+        let champion = stats.champion
+        let position = OPGGPosition(role: stats.role)
+        var laneOpponentChampion: String?
         let me = match.focusParticipant
         let team = match.participants.filter { $0.teamId == me?.teamId }
         let takedowns = stats.kills + stats.assists
@@ -214,6 +217,7 @@ enum CoachService {
         // reconstructed from the timeline at import.
         if let me, me.role != "—",
            let opponent = match.participants.first(where: { $0.teamId != me.teamId && $0.role == me.role }) {
+            laneOpponentChampion = opponent.champion
             var line = "Lane opponent: \(opponent.champion), \(opponent.kills)/\(opponent.deaths)/\(opponent.assists), \(opponent.creepScore) CS, \(opponent.goldEarned) gold, \(opponent.damageDealtToChampions) champion damage."
             if let duel = match.opponentEncounters.first(where: { $0.opponentPuuid == opponent.puuid }) {
                 line += " Head-to-head: the player killed them \(duel.killsOnOpponent) times and died to them \(duel.deathsToOpponent) times."
@@ -255,6 +259,29 @@ enum CoachService {
             if let name = await DataDragonService.shared.itemInfo(for: id)?.name { itemNames.append(name) }
         }
         if !itemNames.isEmpty { lines.append("Final items: \(itemNames.joined(separator: ", ")).") }
+
+        // This patch's meta from op.gg, so the coach can tell a build or a
+        // matchup problem apart from a play problem. Best-effort: no line if
+        // op.gg is unreachable.
+        if let position, let meta = try? await OPGGClient.shared.analysis(champion: champion, position: position) {
+            if let core = meta.coreItems {
+                var coreNames: [String] = []
+                for id in core.ids {
+                    if let name = await DataDragonService.shared.itemInfo(for: id)?.name { coreNames.append(name) }
+                }
+                if !coreNames.isEmpty {
+                    lines.append("op.gg's most-built core for \(champion) \(position.title) this patch: \(coreNames.joined(separator: " → ")) (\(Int((core.winRate * 100).rounded()))% win rate).")
+                }
+            }
+            if let opponent = laneOpponentChampion {
+                let key = { (name: String) in name.lowercased().filter(\.isLetter) }
+                let counters = (meta.strongCounters ?? []) + (meta.weakCounters ?? [])
+                // A handful of games is noise, not a matchup.
+                if let duel = counters.first(where: { key($0.championName) == key(opponent) }), duel.play >= 50 {
+                    lines.append("op.gg: \(champion) wins \(Int((duel.myWinRate * 100).rounded()))% of \(duel.play) games against \(opponent) in this lane this patch.")
+                }
+            }
+        }
         return lines
     }
 

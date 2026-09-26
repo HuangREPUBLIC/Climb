@@ -21,7 +21,7 @@ struct ContentView: View {
     @ObservedObject private var keyPrompt = APIKeyPrompt.shared
 
     private enum Tab {
-        case matches, stats, search
+        case matches, champions, stats, search
     }
 
     var body: some View {
@@ -33,6 +33,14 @@ struct ContentView: View {
                 Label("Matches", systemImage: "list.bullet.rectangle.portrait")
             }
             .tag(Tab.matches)
+
+            NavigationStack {
+                ChampionsView()
+            }
+            .tabItem {
+                Label("Champions", systemImage: "star.circle")
+            }
+            .tag(Tab.champions)
 
             NavigationStack {
                 StatsView()
@@ -60,6 +68,7 @@ struct ContentView: View {
             NotificationRouter.shared.start()
             #if DEBUG
             PerformanceScore.selfCheck()
+            OPGGNotation.selfCheck()
             #endif
             // Notification permission is requested in context — right before the
             // first reflection reminder is actually scheduled, in
