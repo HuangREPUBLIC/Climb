@@ -1,27 +1,71 @@
 import SwiftUI
 
-/// One reflection tag, drawn the same way everywhere it appears — in the
-/// editor, on a match row filter, and in the stats breakdown.
+/// A queue or reflection tag, drawn the same way everywhere it appears — in
+/// the editor, the filter bars, and the stats breakdown. Tinted when idle,
+/// solid when selected.
 struct TagChip: View {
     let text: String
-    var isSelected: Bool = true
-    var tint: Color = Theme.accent
+    var isSelected: Bool = false
 
     var body: some View {
-        Text(text)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(isSelected ? tint : .secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            // A translucent fill rather than a system grey: the chip sits on a
-            // white card in the editor and on the grouped background in the
-            // filter bar, and a fixed grey disappears against one of them.
-            .background(isSelected ? tint.opacity(0.14) : Color.secondary.opacity(0.12))
-            .overlay(
-                Capsule().strokeBorder(isSelected ? tint.opacity(0.35) : .clear, lineWidth: 1)
-            )
-            .clipShape(Capsule())
-            .lineLimit(1)
+        let style = ChipStyle.of(text)
+        // Idle chips keep dark text and carry the colour in the icon, fill
+        // and border — several of these tints are too light to be text on white.
+        HStack(spacing: 4) {
+            Image(systemName: style.icon)
+                .imageScale(.small)
+                .foregroundStyle(isSelected ? Color.black : style.tint)
+            Text(text)
+                .foregroundStyle(isSelected ? Color.black : .primary)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isSelected ? style.tint : style.tint.opacity(0.12), in: Capsule())
+        .overlay(Capsule().strokeBorder(style.tint.opacity(isSelected ? 0 : 0.35), lineWidth: 1))
+        .lineLimit(1)
+    }
+}
+
+/// Colour and icon by what a chip means: each queue its own colour, green
+/// for a tag about something that went well, red for one that didn't, orange
+/// for things outside the player's hands, blue for anything custom.
+enum ChipStyle {
+    static func of(_ text: String) -> (tint: Color, icon: String) {
+        switch text {
+        case "Ranked Solo/Duo", "Ranked TFT": return (Theme.fair, "trophy.fill")
+        case "Ranked Flex": return (.orange, "person.3.fill")
+        case "Normal (Draft)", "Normal (Blind)", "Normal TFT", "Quickplay": return (.blue, "gamecontroller.fill")
+        case "Swiftplay", "Hyper Roll": return (.purple, "bolt.fill")
+        case "ARAM", "ARAM Clash", "ARAM: Mayhem": return (.cyan, "snowflake")
+        case "Clash": return (.pink, "flag.2.crossed.fill")
+        case "Co-op vs. AI", "Tutorial": return (.mint, "cpu")
+        case "URF", "One for All", "Ultimate Spellbook", "Nexus Blitz", "Arena", "Swarm", "Brawl", "Double Up":
+            return (.indigo, "sparkles")
+
+        case "Won lane": return (Theme.good, "arrow.up.right")
+        case "Good vision": return (Theme.good, "eye.fill")
+        case "Good macro": return (Theme.good, "map.fill")
+        case "Good positioning": return (Theme.good, "scope")
+        case "Highroll": return (Theme.good, "dice.fill")
+
+        case "Lost lane": return (Theme.poor, "arrow.down.right")
+        case "Died overextending": return (Theme.poor, "figure.fall")
+        case "Poor vision": return (Theme.poor, "eye.slash.fill")
+        case "Bad macro": return (Theme.poor, "map")
+        case "Wrong build", "Bad items": return (Theme.poor, "hammer.fill")
+        case "Threw a lead": return (Theme.poor, "chart.line.downtrend.xyaxis")
+        case "Tilted": return (Theme.poor, "flame.fill")
+        case "Bad positioning": return (Theme.poor, "scope")
+        case "Lowroll": return (Theme.poor, "dice")
+        case "Greedy econ": return (Theme.poor, "dollarsign.circle")
+        case "Forced a comp": return (Theme.poor, "arrow.triangle.merge")
+
+        case "Bad matchup": return (.orange, "person.2.fill")
+        case "Team diff": return (.orange, "person.3.sequence.fill")
+        case "Contested": return (.orange, "person.2.wave.2.fill")
+        default: return (.blue, "tag.fill")
+        }
     }
 }
 
@@ -123,7 +167,6 @@ struct TagFilterBar: View {
                 }
             }
             .padding(.horizontal)
-            .padding(.vertical, 8)
         }
     }
 }

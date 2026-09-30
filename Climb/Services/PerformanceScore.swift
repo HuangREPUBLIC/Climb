@@ -78,17 +78,22 @@ enum PerformanceScore {
     }
 
     static func compute(for participant: MatchParticipantSummary, in match: Match) -> Double {
-        let players = match.participants
-        let lobby = players.map {
+        guard let index = match.participants.firstIndex(where: { $0 === participant }) else { return lobbyAverage }
+        return lobbyScores(in: match)[index]
+    }
+
+    /// Every player's score from one pass over the lobby, in
+    /// `match.participants` order — awards and ranks read this rather than
+    /// re-scoring the whole lobby once per player.
+    static func lobbyScores(in match: Match) -> [Double] {
+        let lobby = match.participants.map {
             Line(
                 teamId: $0.teamId, kills: $0.kills, deaths: $0.deaths, assists: $0.assists,
                 damage: $0.damageDealtToChampions, damageTaken: $0.damageTaken,
                 creepScore: $0.creepScore, visionScore: $0.visionScore, win: $0.win, role: $0.role
             )
         }
-        let all = scores(lobby, minutes: Double(match.gameDurationSeconds) / 60)
-        guard let index = players.firstIndex(where: { $0 === participant }) else { return lobbyAverage }
-        return all[index]
+        return scores(lobby, minutes: Double(match.gameDurationSeconds) / 60)
     }
 
     #if DEBUG
@@ -122,7 +127,7 @@ enum PerformanceScore {
     /// MVP is the best score on the winning side, SVP the best on the losing
     /// side — matching how the reference app labels them.
     static func awards(in match: Match) -> (mvp: String?, svp: String?) {
-        let scored = match.participants.map { ($0, compute(for: $0, in: match)) }
+        let scored = Array(zip(match.participants, lobbyScores(in: match)))
         let mvp = scored.filter { $0.0.win }.max { $0.1 < $1.1 }?.0.puuid
         let svp = scored.filter { !$0.0.win }.max { $0.1 < $1.1 }?.0.puuid
         return (mvp, svp)
@@ -133,42 +138,17 @@ enum PerformanceScore {
     /// Ranked on the very number the scoreboard prints beside it, so the badge
     /// and the figure it sits next to can never disagree.
     static func rank(for participant: MatchParticipantSummary, in match: Match) -> Int? {
-        let ordered = match.participants
-            .map { ($0.puuid, compute(for: $0, in: match)) }
+        let ordered = zip(match.participants.map(\.puuid), lobbyScores(in: match))
             .sorted { $0.1 > $1.1 }
         guard let index = ordered.firstIndex(where: { $0.0 == participant.puuid }) else { return nil }
         return index + 1
     }
 
-    static func label(for score: Double) -> String {
-        switch score {
-        case 9...: return "Outstanding"
-        case 8..<9: return "Great"
-        case 6.5..<8: return "Solid"
-        case 5..<6.5: return "Average"
-        default: return "Rough"
-        }
-    }
-
-    /// For tinted text on a normal background.
+    /// Traffic light on the 0-10 scale: 6+ green, 4-6 yellow, under 4 red.
+    /// The lobby averages 5.5, so an ordinary game reads yellow. Banded on the
+    /// one-decimal figure shown, so a 3.96 printed as "4.0" isn't red.
     static func color(for score: Double) -> Color {
-        switch score {
-        case 8...: return .orange
-        case 6.5..<8: return .green
-        case 5..<6.5: return .blue
-        default: return .secondary
-        }
-    }
-
-    /// For a solid chip. Never `.secondary` — a grey fill over champion
-    /// splash art is exactly the low-contrast case that made the score
-    /// unreadable, so weak scores get a saturated slate instead.
-    static func chipColor(for score: Double) -> Color {
-        switch score {
-        case 8...: return Color(red: 0.85, green: 0.45, blue: 0.10)
-        case 6.5..<8: return Color(red: 0.15, green: 0.60, blue: 0.35)
-        case 5..<6.5: return Color(red: 0.15, green: 0.40, blue: 0.75)
-        default: return Color(red: 0.32, green: 0.34, blue: 0.40)
-        }
+        let shown = (score * 10).rounded() / 10
+        return shown >= 6 ? Theme.good : shown >= 4 ? Theme.fair : Theme.poor
     }
 }

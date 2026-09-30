@@ -108,6 +108,13 @@ actor DataDragonService {
         return URL(string: "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/\(id)_0.jpg")
     }
 
+    /// The portrait loading-screen art: the whole champion, face near the
+    /// top, where the landscape splash crops badly into a narrow frame.
+    nonisolated func loadingArtURL(for championName: String) -> URL? {
+        let id = Self.dataDragonID(for: championName)
+        return URL(string: "https://ddragon.leagueoflegends.com/cdn/img/champion/loading/\(id)_0.jpg")
+    }
+
     func itemIconURL(for itemID: Int) async -> URL? {
         guard itemID != 0 else { return nil }
         let version = await currentVersion()
@@ -121,12 +128,22 @@ actor DataDragonService {
     }
 
     private var itemInfoByID: [Int: ItemInfo] = [:]
+    // Every match card prices its build on first launch; same reentrancy
+    // guard as championIDsTask so item.json downloads once. Kept after it
+    // finishes, so a failed load isn't retried by every card — callers fall
+    // back to icons without names or prices for the rest of the launch.
+    private var itemDataTask: Task<Void, Never>?
 
     func itemInfo(for itemID: Int) async -> ItemInfo? {
-        if itemInfoByID.isEmpty {
-            await loadItemData()
-        }
+        if itemDataTask == nil { itemDataTask = Task { await loadItemData() } }
+        await itemDataTask?.value
         return itemInfoByID[itemID]
+    }
+
+    /// Total gold cost of each item, in one hop instead of one per item.
+    func itemCosts(_ itemIDs: [Int]) async -> [Int: Int] {
+        _ = await itemInfo(for: 0)
+        return Dictionary(itemIDs.map { ($0, itemInfoByID[$0]?.totalCost ?? 0) }, uniquingKeysWith: { a, _ in a })
     }
 
     private func loadItemData() async {

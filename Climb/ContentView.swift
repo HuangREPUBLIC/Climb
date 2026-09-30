@@ -16,47 +16,75 @@ struct ContentView: View {
     /// push a destination from outside any of them.
     @State private var selectedTab: Tab = .matches
     @State private var matchPath = NavigationPath()
+    /// The custom bar sits in the safe area, so it would ride up on the
+    /// keyboard — onto the coach chat's input. The system bar stayed behind
+    /// the keyboard; this keeps that.
+    @State private var keyboardShown = false
+    /// Set by a screen that wants the whole height; see `hidesTabBar()`.
+    @State private var screenHidesBar = false
 
     @ObservedObject private var router = NotificationRouter.shared
     @ObservedObject private var keyPrompt = APIKeyPrompt.shared
 
-    private enum Tab {
+    enum Tab: CaseIterable {
         case matches, champions, stats, search
+
+        var title: String {
+            switch self {
+            case .matches: "Matches"
+            case .champions: "Champions"
+            case .stats: "Stats"
+            case .search: "Search"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .matches: "list.bullet.rectangle.portrait.fill"
+            case .champions: "star.circle.fill"
+            case .stats: "chart.line.uptrend.xyaxis"
+            case .search: "magnifyingglass"
+            }
+        }
     }
 
     var body: some View {
+        // TabView still owns each tab's lifetime and navigation state; only
+        // its bar is swapped for ClimbTabBar.
         TabView(selection: $selectedTab) {
             NavigationStack(path: $matchPath) {
-                ProfileView()
+                ProfileView(path: $matchPath)
             }
-            .tabItem {
-                Label("Matches", systemImage: "list.bullet.rectangle.portrait")
-            }
+            .toolbar(.hidden, for: .tabBar)
             .tag(Tab.matches)
 
             NavigationStack {
                 ChampionsView()
             }
-            .tabItem {
-                Label("Champions", systemImage: "star.circle")
-            }
+            .toolbar(.hidden, for: .tabBar)
             .tag(Tab.champions)
 
             NavigationStack {
                 StatsView()
             }
-            .tabItem {
-                Label("Stats", systemImage: "chart.line.uptrend.xyaxis")
-            }
+            .toolbar(.hidden, for: .tabBar)
             .tag(Tab.stats)
 
             NavigationStack {
                 SearchView()
             }
-            .tabItem {
-                Label("Search", systemImage: "magnifyingglass")
-            }
+            .toolbar(.hidden, for: .tabBar)
             .tag(Tab.search)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !keyboardShown && !screenHidesBar { ClimbTabBar(selection: $selectedTab) }
+        }
+        .onPreferenceChange(TabBarHiddenKey.self) { screenHidesBar = $0 }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            keyboardShown = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardShown = false
         }
         .sheet(isPresented: $keyPrompt.riotKeyRejected) {
             NavigationStack {
@@ -68,6 +96,7 @@ struct ContentView: View {
             NotificationRouter.shared.start()
             #if DEBUG
             PerformanceScore.selfCheck()
+            MatchRowView.selfCheck()
             OPGGNotation.selfCheck()
             #endif
             // Notification permission is requested in context — right before the
@@ -101,6 +130,70 @@ struct ContentView: View {
         selectedTab = .matches
         matchPath = NavigationPath()
         matchPath.append(match)
+    }
+}
+
+/// The custom bar's version of `.toolbar(.hidden, for: .tabBar)`, which only
+/// reaches the system bar.
+struct TabBarHiddenKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
+extension View {
+    func hidesTabBar() -> some View { preference(key: TabBarHiddenKey.self, value: true) }
+}
+
+/// The floating bottom bar: a white capsule where the selected tab is a gold
+/// pill with its name, and the others are icons only.
+private struct ClimbTabBar: View {
+    @Binding var selection: ContentView.Tab
+    @Namespace private var pill
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(ContentView.Tab.allCases, id: \.self) { tab in
+                let selected = tab == selection
+                Button {
+                    withAnimation(.snappy(duration: 0.3)) { selection = tab }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: tab.icon)
+                            .font(.body.weight(.semibold))
+                        if selected {
+                            Text(tab.title)
+                                .font(.subheadline.weight(.bold))
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
+                    }
+                    .foregroundStyle(selected ? Color.white : Color.secondary)
+                    .padding(.horizontal, 16)
+                    .frame(maxWidth: selected ? nil : .infinity, minHeight: 48)
+                    .background {
+                        if selected {
+                            Capsule()
+                                .fill(Theme.accent)
+                                .matchedGeometryEffect(id: "pill", in: pill)
+                        }
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(6)
+        .background {
+            Capsule().fill(.regularMaterial)
+            Capsule().fill(Theme.surface.opacity(0.85))
+        }
+        .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 4)
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }
 

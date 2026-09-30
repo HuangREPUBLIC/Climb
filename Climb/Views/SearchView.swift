@@ -57,7 +57,7 @@ struct SearchView: View {
             .padding()
             .readableContentWidth()
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Theme.background)
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Search")
         .navigationDestination(item: $found) { player in
@@ -141,9 +141,7 @@ struct SearchView: View {
                 }
             }
             .padding(.horizontal)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .cardShadow()
+            .cardSurface(padding: 0)
         }
     }
 

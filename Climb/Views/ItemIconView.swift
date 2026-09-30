@@ -30,8 +30,6 @@ struct ItemIconView: View {
             guard interactive else { return }
             showingDetail = true
         }
-        .sheet(isPresented: $showingDetail) {
-            ItemDetailView(itemID: itemID)
-        }
+        .itemPopover(itemID, isPresented: $showingDetail)
     }
 }

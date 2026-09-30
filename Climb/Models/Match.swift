@@ -79,6 +79,16 @@ extension Match {
         return participants.first { $0.puuid == parts[1] }
     }
 
+    /// Game length in minutes, floored at one so a remake can't divide by zero.
+    var minutes: Double { max(Double(gameDurationSeconds) / 60, 1) }
+
+    /// The enemy in the same role — the only fair comparison for farm and
+    /// lane fights. Nil in modes without lanes.
+    func laneOpponent(of player: MatchParticipantSummary) -> MatchParticipantSummary? {
+        guard player.role != "—" else { return nil }
+        return participants.first { $0.teamId != player.teamId && $0.role == player.role }
+    }
+
     /// The server the game was played on, from Riot's match-id prefix
     /// ("JP1_603518261" is .jp1), so a game browsed from another server's
     /// player looks its players up there rather than on your own.

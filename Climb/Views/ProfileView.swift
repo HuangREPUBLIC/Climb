@@ -5,6 +5,10 @@ import SwiftData
 /// synced game on one scroll, the way 掌盟 lays it out — rather than a profile
 /// previewing five games and a second tab listing the same ones again.
 struct ProfileView: View {
+    /// The Matches stack's path, owned by ContentView. A match is pushed onto
+    /// it rather than presented by item, so links inside the match screen
+    /// (the AI coach) push onto the same stack.
+    @Binding var path: NavigationPath
     @Query private var accounts: [LinkedAccount]
     @Query(sort: \Match.timestamp, order: .reverse) private var allMatches: [Match]
     @AppStorage("selectedGame") private var selectedGame: Game = .league
@@ -14,6 +18,7 @@ struct ProfileView: View {
     @State private var isLoadingOlder = false
     @State private var reachedEnd = false
     @State private var olderLoadFailed = false
+    @State private var taggingMatch: Match?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -40,21 +45,19 @@ struct ProfileView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                header
-
                 VStack(spacing: 16) {
+                    header
                     unpublishedMatchNotice
-                    if !matches.isEmpty { summaryCard }
                 }
                 .padding(.horizontal)
 
-                if queues.count > 1 {
-                    TagFilterBar(tags: queues, selection: $queueFilter)
-                        .padding(.vertical, -8)
-                }
-                if !tags.isEmpty {
-                    TagFilterBar(tags: tags, selection: $tagFilter)
-                        .padding(.vertical, -8)
+                VStack(spacing: 0) {
+                    if queues.count > 1 {
+                        TagFilterBar(tags: queues, selection: $queueFilter)
+                    }
+                    if !tags.isEmpty {
+                        TagFilterBar(tags: tags, selection: $tagFilter)
+                    }
                 }
 
                 Group {
@@ -71,7 +74,11 @@ struct ProfileView: View {
                             description: Text("Tap the selected filter again to clear it.")
                         )
                     } else {
-                        matchList
+                        MatchCardList(
+                            matches: filteredMatches,
+                            open: { path.append($0) },
+                            editTags: { taggingMatch = $0 }
+                        )
                     }
                     if selectedGame == .league, account != nil, !matches.isEmpty {
                         loadOlderButton
@@ -82,12 +89,10 @@ struct ProfileView: View {
             .padding(.bottom)
             .readableContentWidth()
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Theme.background)
         // The standard system gesture for "get the latest data".
         .refreshable { try? await MatchImportService.syncLinkedAccount(context: modelContext) }
         .navigationTitle("Matches")
-        // Inline keeps the banner flush under the bar instead of a large-title
-        // block floating above it.
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Match.self) { match in
             MatchDetailView(match: match)
@@ -108,6 +113,9 @@ struct ProfileView: View {
         .sheet(isPresented: $showingLinkAccount) {
             LinkAccountView()
         }
+        .sheet(item: $taggingMatch) { match in
+            TagSheet(match: match, vocabulary: ReflectionTag.vocabulary(for: match.game, usedIn: allMatches))
+        }
         .onChange(of: selectedGame) {
             queueFilter = nil
             tagFilter = nil
@@ -116,37 +124,27 @@ struct ProfileView: View {
 
     // MARK: - Header
 
-    /// The player's most-played champion, used as the banner's backdrop.
-    private var bannerChampion: String? {
-        Dictionary(grouping: matches.compactMap(\.leagueStats?.champion)) { $0 }
-            .max { $0.value.count < $1.value.count }?
-            .key
-    }
-
+    /// The numbers follow the filters, so picking "Ranked Solo/Duo" answers
+    /// "how am I doing in ranked" without a separate screen.
     private var header: some View {
         ProfileBanner(
             profileIconID: account?.profileIconID,
             level: account?.summonerLevel,
-            bannerChampion: bannerChampion
+            matches: matches
         ) {
             if let account {
-                VStack(spacing: 12) {
-                    BannerTitle(text: account.riotID)
-                    RankChip(tier: account.rankTier, division: account.rankDivision, leaguePoints: account.leaguePoints)
-                }
+                BannerTitle(text: account.riotID)
+                RankChip(tier: account.rankTier, division: account.rankDivision, leaguePoints: account.leaguePoints)
             } else {
-                VStack(spacing: 10) {
-                    Text("No Riot account linked")
-                        .font(.title3.bold())
-                        .foregroundStyle(.white)
-                    Button("Link Riot Account") {
-                        showingLinkAccount = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.white.opacity(0.9))
-                    .foregroundStyle(Color.accentColor)
+                Text("No Riot account linked")
+                    .font(.title3.bold())
+                Button("Link Riot Account") {
+                    showingLinkAccount = true
                 }
+                .buttonStyle(.borderedProminent)
             }
+        } footer: {
+            if !matches.isEmpty { StatSummaryCard(matches: filteredMatches, embedded: true) }
         }
     }
 
@@ -184,44 +182,6 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Summary
-
-    /// Follows the filters, so picking "Ranked Solo/Duo" answers "how am I
-    /// doing in ranked" without a separate screen.
-    private var summaryCard: some View {
-        let games = filteredMatches
-        let wins = games.filter { $0.tftStats.map { $0.placement <= 4 } ?? $0.win }.count
-        let winRate = games.isEmpty ? 0 : Double(wins) / Double(games.count) * 100
-        let lines = games.compactMap(\.leagueStats)
-        // Totals over totals, as op.gg does, so one 10/0/10 game can't pass
-        // for an average.
-        let kda = Double(lines.map { $0.kills + $0.assists }.reduce(0, +))
-            / Double(max(lines.map(\.deaths).reduce(0, +), 1))
-
-        return StatSummaryCard(stats: [
-            .init(icon: "percent", tint: winRate >= 50 ? Theme.win : Theme.loss, label: "Win rate", value: "\(Int(winRate.rounded()))%"),
-            lines.isEmpty
-                ? .init(icon: "gamecontroller.fill", label: "Games", value: "\(games.count)")
-                : .init(icon: "bolt.fill", label: "KDA", value: String(format: "%.2f", kda)),
-            .init(icon: "trophy.fill", tint: .yellow, label: "Record", value: "\(wins)W \(games.count - wins)L")
-        ])
-    }
-
-    // MARK: - Matches
-
-    private var matchList: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(Array(filteredMatches.enumerated()), id: \.element.id) { index, match in
-                if index > 0 { Divider() }
-                NavigationLink(value: match) {
-                    MatchRowView(match: match)
-                }
-                .buttonStyle(PressableButtonStyle())
-            }
-        }
-        .cardSurface()
-    }
-
     /// A button, not infinite scroll: each page costs ~40 requests against a
     /// personal key's 100 per two minutes, so loading more is a deliberate act.
     private var loadOlderButton: some View {
@@ -253,5 +213,31 @@ struct ProfileView: View {
         }
         .buttonStyle(PressableButtonStyle())
         .disabled(isLoadingOlder)
+    }
+}
+
+/// Tags for one match from the long-press menu, without opening the match.
+private struct TagSheet: View {
+    @Bindable var match: Match
+    let vocabulary: [String]
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                TagEditor(tags: $match.tags, vocabulary: vocabulary)
+                    .padding()
+            }
+            .background(Theme.background)
+            .navigationTitle("Tags")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }

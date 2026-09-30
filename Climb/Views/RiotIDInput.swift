@@ -73,7 +73,7 @@ struct RiotIDInput: View {
         .autocorrectionDisabled()
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color(.tertiarySystemGroupedBackground))
+        .background(Theme.surfaceRaised)
         .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 

@@ -170,7 +170,7 @@ enum CoachService {
     /// question it can only answer generically.
     private static func leagueFacts(for match: Match, stats: LeagueStats, ownMatches: [Match]) async -> [String] {
         var lines: [String] = []
-        let minutes = max(Double(match.gameDurationSeconds) / 60, 1)
+        let minutes = match.minutes
         func perMinute(_ value: Int) -> String { String(format: "%.1f", Double(value) / minutes) }
         func percent(_ part: Int, of whole: Int) -> Int {
             whole > 0 ? Int((Double(part) / Double(whole) * 100).rounded()) : 0
@@ -215,8 +215,7 @@ enum CoachService {
 
         // The lane opponent, and who actually won the fights between you —
         // reconstructed from the timeline at import.
-        if let me, me.role != "—",
-           let opponent = match.participants.first(where: { $0.teamId != me.teamId && $0.role == me.role }) {
+        if let me, let opponent = match.laneOpponent(of: me) {
             laneOpponentChampion = opponent.champion
             var line = "Lane opponent: \(opponent.champion), \(opponent.kills)/\(opponent.deaths)/\(opponent.assists), \(opponent.creepScore) CS, \(opponent.goldEarned) gold, \(opponent.damageDealtToChampions) champion damage."
             if let duel = match.opponentEncounters.first(where: { $0.opponentPuuid == opponent.puuid }) {

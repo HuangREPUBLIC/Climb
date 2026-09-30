@@ -5,10 +5,9 @@ struct PlayerAggregateStats {
     /// Totals over totals, as op.gg does, so one 10/0/10 game can't pass for
     /// an average.
     let kda: Double
-    let gamesSampled: Int
     let topChampion: String?
 
-    static let empty = PlayerAggregateStats(winRate: 0, kda: 0, gamesSampled: 0, topChampion: nil)
+    static let empty = PlayerAggregateStats(winRate: 0, kda: 0, topChampion: nil)
 }
 
 enum FriendComparisonService {
@@ -25,7 +24,6 @@ enum FriendComparisonService {
         return PlayerAggregateStats(
             winRate: Double(lines.filter(\.win).count) / Double(lines.count) * 100,
             kda: Double(takedowns) / Double(max(deaths, 1)),
-            gamesSampled: lines.count,
             topChampion: Dictionary(grouping: lines, by: \.champion).max { $0.value.count < $1.value.count }?.key
         )
     }

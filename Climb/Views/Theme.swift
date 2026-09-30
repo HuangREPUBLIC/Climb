@@ -25,24 +25,56 @@ enum Theme {
 
     // MARK: - Colour
 
-    /// The single accent. Everything that means "this is you / this is
-    /// selected / this is primary" uses it.
-    static let accent = Color.accentColor
+    /// Always light: cream page, white cards, the League client's gold and
+    /// teal as accents. Navy is kept for a few feature cards (`navyGradient`).
+    /// Forced in `ClimbApp`, so these are fixed values, not adaptive.
+    static let background = Color(red: 0.961, green: 0.953, blue: 0.933)   // #F5F3EE
+    static let surface = Color.white
+    static let surfaceRaised = Color(red: 0.945, green: 0.937, blue: 0.914) // #F1EFE9
+    static let hairline = Color.black.opacity(0.06)
+
+    /// Deep gold #A8863F, dark enough to read on white. Also the root
+    /// `.tint`, and the AccentColor asset holds the same value for the tint
+    /// UIKit draws itself (alert buttons).
+    static let accent = Color(red: 0.659, green: 0.525, blue: 0.247)
+    /// The client's own lighter gold, for text on navy.
+    static let goldOnDark = Color(red: 0.784, green: 0.667, blue: 0.431)    // #C8AA6E
+    static let teal = Color(red: 0.039, green: 0.620, blue: 0.576)          // #0A9E93
+
+    static let navy = Color(red: 0.039, green: 0.078, blue: 0.157)          // #0A1428
+    static let navyGradient = LinearGradient(
+        colors: [navy, Color(red: 0.102, green: 0.161, blue: 0.259)],      // → #1A2942
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    /// Traffic light. The system green and yellow wash out as text on white,
+    /// so these are darkened until they read.
+    static let good = Color(red: 0.13, green: 0.60, blue: 0.33)
+    static let fair = Color(red: 0.72, green: 0.51, blue: 0.0)
+    static let poor = Color(red: 0.85, green: 0.20, blue: 0.20)
+    /// For white text on orange, which the system orange is too light for.
+    static let orange = Color(red: 0.85, green: 0.42, blue: 0.0)
 
     /// Team colours are semantic, not decorative — they map to the game's
     /// own blue-side / red-side language, so they stay distinct from accent.
     static let ally = Color.blue
     static let enemy = Color.red
 
-    static let win = Color.green
-    static let loss = Color.red
+    static let win = good
+    static let loss = poor
 
     /// Charts use the accent rather than a per-screen colour.
-    static let chart = Color.accentColor
+    static let chart = accent
 
-    /// Tinted rather than pure black, so elevation reads as depth instead of
-    /// a hard drop shadow.
-    static let shadow = Color.black.opacity(0.05)
+    static let shadow = Color.black.opacity(0.06)
+
+    /// KDA ratio: 3+ is good, under 1 means dying more than helping. Banded
+    /// on the two-decimal figure shown, so "3.00" is never yellow.
+    static func kdaColor(_ kda: Double) -> Color {
+        let shown = (kda * 100).rounded() / 100
+        return shown >= 3 ? good : shown >= 1 ? fair : poor
+    }
 }
 
 /// Standard card surface. Replaces the per-file `sectionCard` helpers that
@@ -53,8 +85,12 @@ struct CardSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(Color(.secondarySystemGroupedBackground))
+            .background(Theme.surface)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: 1)
+            )
             .cardShadow()
     }
 }
@@ -78,24 +114,22 @@ extension View {
 struct ScaledFont: ViewModifier {
     @ScaledMetric private var size: CGFloat
     private let weight: Font.Weight
-    private let design: Font.Design
     private let monospacedDigit: Bool
 
     init(
         size: CGFloat,
         relativeTo textStyle: Font.TextStyle,
         weight: Font.Weight,
-        design: Font.Design,
         monospacedDigit: Bool
     ) {
         _size = ScaledMetric(wrappedValue: size, relativeTo: textStyle)
         self.weight = weight
-        self.design = design
         self.monospacedDigit = monospacedDigit
     }
 
     func body(content: Content) -> some View {
-        let font = Font.system(size: size, weight: weight, design: design)
+        // No design: the app-wide `.fontDesign(.rounded)` applies.
+        let font = Font.system(size: size, weight: weight)
         return content.font(monospacedDigit ? font.monospacedDigit() : font)
     }
 }
@@ -108,14 +142,12 @@ extension View {
         _ size: CGFloat,
         relativeTo textStyle: Font.TextStyle = .caption2,
         weight: Font.Weight = .regular,
-        design: Font.Design = .default,
         monospacedDigit: Bool = false
     ) -> some View {
         modifier(ScaledFont(
             size: size,
             relativeTo: textStyle,
             weight: weight,
-            design: design,
             monospacedDigit: monospacedDigit
         ))
     }

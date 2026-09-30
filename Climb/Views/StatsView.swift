@@ -2,15 +2,6 @@ import SwiftUI
 import SwiftData
 import Charts
 
-private struct ChampionRecord: Identifiable {
-    let champion: String
-    let games: Int
-    let wins: Int
-    let kda: Double
-    var id: String { champion }
-    var winRate: Double { games == 0 ? 0 : Double(wins) / Double(games) * 100 }
-}
-
 private struct KDAGamePoint: Identifiable {
     let index: Int
     let kda: Double
@@ -71,7 +62,6 @@ struct StatsView: View {
     @ScaledMetric(relativeTo: .caption) private var countColumnWidth: CGFloat = 30
     @ScaledMetric(relativeTo: .caption) private var listPortraitSize: CGFloat = 32
     @ScaledMetric(relativeTo: .caption2) private var legendDotSize: CGFloat = 6
-    @ScaledMetric(relativeTo: .caption2) private var formPipHeight: CGFloat = 22
     /// Charts grow with the text so their axis labels stay proportionate
     /// rather than crowding a fixed-height plot.
     @ScaledMetric(relativeTo: .caption) private var chartHeight: CGFloat = 150
@@ -101,8 +91,8 @@ struct StatsView: View {
                     }
                     VStack(alignment: .leading, spacing: Theme.sectionSpacing) {
                         if !leagueMatches.isEmpty {
-                            headlineCard(for: leagueMatches)
-                            section("KDA by game") { kdaChart }
+                            StatsBento(matches: leagueMatches)
+                            section("KDA ratio by game") { kdaChart }
                             section("Champions") { championTable }
                             section("Win rate by role") { roleChart }
                         }
@@ -124,7 +114,7 @@ struct StatsView: View {
                     .padding()
                     .readableContentWidth()
                 }
-                .background(Color(.systemGroupedBackground))
+                .background(Theme.background)
             }
         }
         .navigationTitle("Stats")
@@ -160,52 +150,7 @@ struct StatsView: View {
         }
     }
 
-    // MARK: - Headline
-
-    /// Win rate, record, and the shape of the last ten games. The run of
-    /// results is what a player actually wants first — a single averaged
-    /// percentage hides whether they are climbing or sliding.
-    private func headlineCard(for matches: [Match]) -> some View {
-        let wins = matches.filter(\.win).count
-        let winRate = matches.isEmpty ? 0 : Double(wins) / Double(matches.count) * 100
-        let recent = Array(matches.suffix(10))
-
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Win rate").font(.caption).foregroundStyle(.secondary)
-                    Text("\(Int(winRate.rounded()))%")
-                        .font(.largeTitle.bold().monospacedDigit())
-                        .foregroundStyle(winRate >= 50 ? Theme.win : Theme.loss)
-                }
-                Spacer(minLength: 12)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Record").font(.caption).foregroundStyle(.secondary)
-                    Text("\(wins)W – \(matches.count - wins)L")
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                }
-            }
-
-            if recent.count > 1 {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Last \(recent.count)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 4) {
-                        ForEach(Array(recent.enumerated()), id: \.offset) { _, match in
-                            Capsule()
-                                .fill(match.win ? Theme.win : Theme.loss)
-                                .frame(height: formPipHeight)
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Last \(recent.count) games: \(recent.filter(\.win).count) wins")
-                }
-            }
-        }
-        .cardSurface()
-    }
+    // MARK: - TFT
 
     private var placementHeadlineCard: some View {
         let placements = tftMatches.compactMap { $0.tftStats?.placement }
@@ -291,13 +236,7 @@ struct StatsView: View {
     /// KDA on one row — op.gg's champion table — instead of a play-count chart
     /// and a win-rate list repeating the same champions.
     private var championRecords: [ChampionRecord] {
-        Dictionary(grouping: leagueMatches) { $0.leagueStats?.champion ?? "Unknown" }
-            .map { champion, games in
-                let lines = games.compactMap(\.leagueStats)
-                let kda = Double(lines.map { $0.kills + $0.assists }.reduce(0, +))
-                    / Double(max(lines.map(\.deaths).reduce(0, +), 1))
-                return ChampionRecord(champion: champion, games: games.count, wins: games.filter(\.win).count, kda: kda)
-            }
+        ChampionRecord.records(from: leagueMatches)
             .sorted { $0.games == $1.games ? $0.winRate > $1.winRate : $0.games > $1.games }
     }
 
@@ -366,7 +305,7 @@ struct StatsView: View {
                     y: .value("KDA", max(point.kda, 0.08)),
                     width: .fixed(9)
                 )
-                .foregroundStyle(point.win ? Color.green.gradient : Color.red.gradient)
+                .foregroundStyle(point.win ? Theme.win.gradient : Theme.loss.gradient)
                 .cornerRadius(3)
             }
             RuleMark(y: .value("Average", average))
@@ -387,8 +326,8 @@ struct StatsView: View {
 
         // One row with the caption pushed right, until the text is large enough
         // that the two would collide — then it wraps.
-        let legend = legendDot(color: .green, label: "Win")
-        let lossLegend = legendDot(color: .red, label: "Loss")
+        let legend = legendDot(color: Theme.win, label: "Win")
+        let lossLegend = legendDot(color: Theme.loss, label: "Loss")
         let caption = Text("oldest → newest").scaledFont(9).foregroundStyle(.tertiary)
         if dynamicTypeSize.isAccessibilitySize {
             FlowLayout(spacing: 12) { legend; lossLegend; caption }
@@ -423,7 +362,7 @@ struct StatsView: View {
                 // The game count rides on the label, so one lucky game can't
                 // pass for a 100% role, and 0% reads as 0% rather than no bar.
                 BarMark(x: .value("Role", "\(entry.role) (\(entry.games))"), y: .value("Win rate", entry.winRate))
-                    .foregroundStyle(entry.winRate >= 50 ? Color.green.gradient : Color.red.gradient)
+                    .foregroundStyle(entry.winRate >= 50 ? Theme.win.gradient : Theme.loss.gradient)
                     .cornerRadius(4)
                     .annotation(position: .top) {
                         Text("\(Int(entry.winRate.rounded()))%")

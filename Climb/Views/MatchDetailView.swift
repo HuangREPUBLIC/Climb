@@ -77,7 +77,7 @@ struct MatchDetailView: View {
             }
             .readableContentWidth()
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Theme.background)
         .navigationTitle(match.leagueStats?.champion ?? (match.tftStats != nil ? "Teamfight Tactics" : match.game.shortName))
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: CoachRoute.self) { route in
@@ -134,13 +134,13 @@ struct MatchDetailView: View {
             VStack(spacing: 4) {
                 Text("#\(stats.placement)")
                     .scaledFont(56, relativeTo: .largeTitle, weight: .bold)
-                    .foregroundStyle(stats.placement <= 4 ? .green : .red)
+                    .foregroundStyle(match.win ? Theme.win : Theme.loss)
                 Text("Teamfight Tactics")
                     .font(.headline)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 32)
-            .background(Color(.secondarySystemGroupedBackground))
+            .background(Theme.surface)
         }
     }
 
@@ -151,8 +151,8 @@ struct MatchDetailView: View {
     @ViewBuilder
     private func headerContent(_ stats: LeagueStats) -> some View {
         let headline = Text(match.win ? "VICTORY" : "DEFEAT")
-            .scaledFont(32, relativeTo: .largeTitle, weight: .heavy, design: .rounded)
-            .foregroundStyle(match.win ? Color.green : Color.red)
+            .scaledFont(32, relativeTo: .largeTitle, weight: .heavy)
+            .foregroundStyle(match.win ? Theme.win : Theme.loss)
             .shadow(color: .black.opacity(0.6), radius: 6, y: 2)
 
         let badge = Group {
@@ -217,16 +217,16 @@ struct MatchDetailView: View {
     private func scoreChip(_ score: Double) -> some View {
         VStack(spacing: -2) {
             Text(String(format: "%.1f", score))
-                .scaledFont(30, relativeTo: .largeTitle, weight: .heavy, design: .rounded, monospacedDigit: true)
+                .scaledFont(30, relativeTo: .largeTitle, weight: .heavy, monospacedDigit: true)
                 .foregroundStyle(.white)
-            Text("EST. SCORE")
+            Text("RATING")
                 .scaledFont(8, weight: .bold)
                 .tracking(0.5)
                 .foregroundStyle(.white.opacity(0.8))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background(PerformanceScore.chipColor(for: score))
+        .background(PerformanceScore.color(for: score))
         .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
@@ -242,17 +242,9 @@ struct MatchDetailView: View {
                 // and kill participation shown as a ring, rather than three
                 // more identical grey rows.
                 HStack(alignment: .center, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 3) {
-                            Text("\(stats.kills)").foregroundStyle(.primary)
-                            Text("/").foregroundStyle(.tertiary)
-                            Text("\(stats.deaths)").foregroundStyle(.red)
-                            Text("/").foregroundStyle(.tertiary)
-                            Text("\(stats.assists)").foregroundStyle(.primary)
-                        }
-                        .font(.title2.bold().monospacedDigit())
-
-                        Text("\(String(format: "%.2f", stats.kda)) KDA · \(stats.role)")
+                    VStack(alignment: .leading, spacing: 6) {
+                        KDAColumns(stats: stats)
+                        Text(stats.role)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -275,7 +267,7 @@ struct MatchDetailView: View {
                     // pink. Only the glyph is tinted — colouring the numbers too
                     // is what turned an earlier version of this card into a
                     // sticker sheet.
-                    iconStat("CS", "\(stats.creepScore)", icon: "leaf.fill", tint: .green)
+                    iconStat("Minions", "\(stats.creepScore)", icon: "leaf.fill", tint: .green)
                     iconStat("Gold", stats.goldEarned.formatted(), icon: "dollarsign.circle.fill", tint: .yellow)
                     iconStat("Vision", "\(stats.visionScore)", icon: "eye.fill", tint: .cyan)
                     iconStat("Dealt", stats.damageDealtToChampions.formatted(), icon: "burst.fill", tint: .red)
@@ -285,11 +277,11 @@ struct MatchDetailView: View {
 
                 // Per-minute rates and standout moments, folded in here rather
                 // than repeated in a separate card.
-                let minutes = max(Double(match.gameDurationSeconds) / 60, 1)
+                let minutes = match.minutes
                 let rates = Group {
                     rateStat("Gold/min", String(format: "%.0f", Double(stats.goldEarned) / minutes))
                     rateStat("Dmg/min", String(format: "%.0f", Double(stats.damageDealtToChampions) / minutes))
-                    rateStat("CS/min", String(format: "%.1f", Double(stats.creepScore) / minutes))
+                    rateStat("Minions/min", String(format: "%.1f", Double(stats.creepScore) / minutes))
                     rateStat("Solo", "\(stats.soloKills)")
                     rateStat("Spree", "\(stats.largestKillingSpree)")
                 }
@@ -393,7 +385,12 @@ struct MatchDetailView: View {
         }
         let laneOrder = ["Top", "Jungle", "Mid", "ADC", "Support"]
 
-        return VStack(spacing: 12) {
+        return VStack(alignment: .leading, spacing: 12) {
+            // Once, above both teams, rather than a label on every row.
+            Label("Each row: rating out of 10 · kills / deaths / assists · items. Tap a player for more.", systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             ForEach(teamIds, id: \.self) { teamId in
                 let players = match.participants
                     .filter { $0.teamId == teamId }
@@ -405,7 +402,7 @@ struct MatchDetailView: View {
                         ScoreboardRowView(
                             participant: player,
                             match: match,
-                            award: player.puuid == awards.mvp ? .mvp : player.puuid == awards.svp ? .svp : nil,
+                            award: MatchAward(puuid: player.puuid, awards: awards),
                             region: region,
                             platform: platform
                         )
@@ -437,9 +434,9 @@ struct MatchDetailView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(won ? Theme.win : Theme.loss)
             Spacer(minLength: 6)
-            Text("\(kills)/\(deaths)/\(assists)")
-                .font(.caption.weight(.semibold).monospacedDigit())
-            Text(String(format: "%.1fk", gold))
+            Text("K/D/A \(Text("\(kills)/\(deaths)/\(assists)").fontWeight(.semibold))")
+                .font(.caption.monospacedDigit())
+            Text("Gold \(String(format: "%.1fk", gold))")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
@@ -495,11 +492,11 @@ struct MatchDetailView: View {
                 .stroke(Color.secondary.opacity(0.15), lineWidth: 6)
             Circle()
                 .trim(from: 0, to: CGFloat(percent) / 100)
-                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .stroke(Theme.accent, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: -1) {
                 Text("\(percent)%")
-                    .scaledFont(15, relativeTo: .subheadline, weight: .bold, design: .rounded, monospacedDigit: true)
+                    .scaledFont(15, relativeTo: .subheadline, weight: .bold, monospacedDigit: true)
                 Text("KP")
                     .scaledFont(8)
                     .foregroundStyle(.secondary)
@@ -540,7 +537,7 @@ struct MatchDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
-        .background(Color(.tertiarySystemGroupedBackground))
+        .background(Theme.surfaceRaised)
         .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 

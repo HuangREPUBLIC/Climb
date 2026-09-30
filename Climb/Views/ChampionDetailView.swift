@@ -21,9 +21,9 @@ struct ChampionDetailView: View {
                 if let analysis {
                     if let stats = analysis.summary?.averageStats {
                         StatSummaryCard(stats: [
-                            .init(icon: "percent", tint: stats.winRate >= 0.5 ? Theme.win : Theme.loss, label: "Win rate", value: stats.winRate.formatted(.percent.precision(.fractionLength(0)))),
-                            .init(icon: "hand.tap", label: "Pick rate", value: stats.pickRate.formatted(.percent.precision(.fractionLength(0)))),
-                            .init(icon: "nosign", label: "Ban rate", value: stats.banRate.formatted(.percent.precision(.fractionLength(0))))
+                            .init(icon: "percent", tint: stats.winRate >= 0.5 ? Theme.win : Theme.loss, label: "Win rate", value: stats.winRate.formatted(.percent.precision(.fractionLength(0))), tintsValue: true, caption: "Games it wins"),
+                            .init(icon: "hand.tap", tint: Theme.teal, label: "Pick rate", value: stats.pickRate.formatted(.percent.precision(.fractionLength(0))), caption: "Games it's picked in"),
+                            .init(icon: "nosign", tint: Theme.loss, label: "Ban rate", value: stats.banRate.formatted(.percent.precision(.fractionLength(0))), caption: "Games it's banned in")
                         ])
                     }
                     buildSection(analysis)
@@ -39,7 +39,7 @@ struct ChampionDetailView: View {
             .padding()
             .readableContentWidth()
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Theme.background)
         .navigationTitle(champion)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -163,8 +163,8 @@ struct ChampionDetailView: View {
     private func skillTint(_ key: String) -> Color {
         switch key {
         case "Q": return .blue
-        case "W": return .green
-        case "E": return .orange
+        case "W": return Theme.good
+        case "E": return Theme.orange
         default: return .red
         }
     }

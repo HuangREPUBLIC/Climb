@@ -110,3 +110,10 @@ final class MatchParticipantSummary {
         self.isLinkedPlayer = isLinkedPlayer
     }
 }
+
+extension MatchParticipantSummary {
+    /// Same rule as `LeagueStats.kda`: a deathless game counts takedowns.
+    var kda: Double {
+        deaths == 0 ? Double(kills + assists) : Double(kills + assists) / Double(deaths)
+    }
+}

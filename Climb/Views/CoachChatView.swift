@@ -76,10 +76,10 @@ struct CoachChatView: View {
 
             composer
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Theme.background)
         .navigationTitle("AI Coach")
         // A conversation wants the full height for the input bar.
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
         .navigationBarTitleDisplayMode(.inline)
         .task {
             conversation = CoachService.conversation(for: match, context: modelContext)
@@ -131,7 +131,7 @@ struct CoachChatView: View {
             .background(
                 message.role == .player
                     ? AnyShapeStyle(Theme.accent)
-                    : AnyShapeStyle(Color(.secondarySystemGroupedBackground))
+                    : AnyShapeStyle(Theme.surface)
             )
             .clipShape(bubbleShape(for: message.role))
             .overlay(
@@ -194,7 +194,7 @@ struct CoachChatView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color(.secondarySystemGroupedBackground))
+            .background(Theme.surface)
             .clipShape(bubbleShape(for: .coach))
             Spacer(minLength: 20)
         }
@@ -252,7 +252,7 @@ struct CoachChatView: View {
                     .lineLimit(1...5)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color(.secondarySystemGroupedBackground))
+                    .background(Theme.surface)
                     .clipShape(Capsule())
 
                 Button {

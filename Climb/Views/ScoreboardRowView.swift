@@ -66,10 +66,10 @@ struct ScoreboardRowView: View {
                 HStack(spacing: 4) {
                     Text(participant.riotIdGameName)
                         .font(.caption.weight(participant.isLinkedPlayer ? .bold : .regular))
-                        .foregroundStyle(participant.isLinkedPlayer ? Color.accentColor : .primary)
+                        .foregroundStyle(participant.isLinkedPlayer ? Theme.accent : .primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    if participant.isLinkedPlayer { badge("YOU", tint: .accentColor) }
+                    if participant.isLinkedPlayer { badge("YOU", tint: Theme.accent) }
                     if let award { badge(award.text, tint: award.tint) }
                     Spacer(minLength: 4)
                     scoreLabel
@@ -154,24 +154,10 @@ struct ScoreboardRowView: View {
         .fixedSize()
     }
 
-    /// Riot's item array is seven *fixed* slots — 0-5 the build, 6 the
-    /// trinket, 0 for empty — so slots are read by index, never compacted,
-    /// which keeps every row's trinket in the same column.
+    /// Display-only at this size; the Items panel is where an item can
+    /// actually be inspected.
     private var items: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<7, id: \.self) { index in
-                let item = index < participant.items.count ? participant.items[index] : 0
-                if item != 0 {
-                    // Display-only at this size; the Items panel is where
-                    // an item can actually be inspected.
-                    ItemIconView(itemID: item, size: itemSize, interactive: false)
-                } else {
-                    RoundedRectangle(cornerRadius: itemSize * 0.2)
-                        .fill(.secondary.opacity(0.08))
-                        .frame(width: itemSize, height: itemSize)
-                }
-            }
-        }
+        ItemSlots(items: participant.items, size: itemSize)
     }
 
     private func badge(_ text: String, tint: Color) -> some View {
@@ -233,7 +219,7 @@ struct ScoreboardRowView: View {
             }
         }
         .padding(12)
-        .background(Color(.tertiarySystemGroupedBackground))
+        .background(Theme.surfaceRaised)
         .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 
@@ -243,7 +229,7 @@ struct ScoreboardRowView: View {
         let killParticipation = teamKills > 0
             ? Int((Double(participant.kills + participant.assists) / Double(teamKills) * 100).rounded())
             : 0
-        let minutes = max(Double(match.gameDurationSeconds) / 60, 1)
+        let minutes = match.minutes
         let columns = dynamicTypeSize.isAccessibilitySize
             ? [GridItem(.flexible()), GridItem(.flexible())]
             : Array(repeating: GridItem(.flexible()), count: 4)
@@ -253,7 +239,7 @@ struct ScoreboardRowView: View {
             stat(participant.damageDealtToChampions.formatted(), "Damage")
             stat(participant.damageTaken.formatted(), "Taken")
             stat(participant.goldEarned.formatted(), "Gold")
-            stat("\(participant.creepScore) (\(String(format: "%.1f", Double(participant.creepScore) / minutes)))", "CS")
+            stat("\(participant.creepScore) (\(String(format: "%.1f", Double(participant.creepScore) / minutes)))", "Minions")
             stat("\(participant.visionScore)", "Vision")
             stat("\(participant.wardsPlaced)/\(participant.wardsKilled)", "Wards")
             stat(participant.totalHeal.formatted(), "Healing")
@@ -274,10 +260,44 @@ struct ScoreboardRowView: View {
     }
 }
 
+/// Riot's item array is seven *fixed* slots — 0-5 the build, 6 the trinket,
+/// 0 for empty — so slots are read by index, never compacted, which keeps
+/// every row's trinket in the same column. Display-only.
+struct ItemSlots: View {
+    let items: [Int]
+    let size: CGFloat
+    var spacing: CGFloat = 2
+
+    var body: some View {
+        HStack(spacing: spacing) {
+            ForEach(0..<7, id: \.self) { index in
+                let item = index < items.count ? items[index] : 0
+                if item != 0 {
+                    ItemIconView(itemID: item, size: size, interactive: false)
+                } else {
+                    RoundedRectangle(cornerRadius: size * 0.2)
+                        .fill(.secondary.opacity(0.08))
+                        .frame(width: size, height: size)
+                }
+            }
+        }
+    }
+}
+
 enum MatchAward {
     case mvp
     case svp
 
     var text: String { self == .mvp ? "MVP" : "SVP" }
-    var tint: Color { self == .mvp ? .orange : .purple }
+    /// Carries white text, so the orange is darkened past the system one.
+    var tint: Color { self == .mvp ? Theme.orange : .purple }
+
+    /// The award `puuid` earned, given a match's `PerformanceScore.awards`.
+    init?(puuid: String, awards: (mvp: String?, svp: String?)) {
+        switch puuid {
+        case awards.mvp: self = .mvp
+        case awards.svp: self = .svp
+        default: return nil
+        }
+    }
 }

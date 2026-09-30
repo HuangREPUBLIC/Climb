@@ -33,11 +33,10 @@ struct GameFilterPicker: View {
                 Image(systemName: "chevron.up.chevron.down")
                     .scaledFont(9, weight: .semibold)
             }
+            // No capsule of its own: the toolbar item's glass is the
+            // background, and text follows the bar's colour scheme.
             .foregroundStyle(.primary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(Capsule())
+            .padding(.horizontal, 4)
         }
     }
 }

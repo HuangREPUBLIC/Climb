@@ -94,9 +94,7 @@ struct PlayerMatchupView: View {
             }
             .padding(16)
         }
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .cardShadow()
+        .cardSurface(padding: 0)
     }
 
     /// One row per team rather than two rows of all ten: every player still
@@ -249,8 +247,8 @@ struct PlayerMatchupView: View {
                       meDisplay: "\(Int(participation(me).rounded()))%", opponentDisplay: "\(Int(participation(opponent).rounded()))%"),
             RadarAxis(label: "Gold", meValue: Double(me.goldEarned), opponentValue: Double(opponent.goldEarned),
                       meDisplay: me.goldEarned.formatted(), opponentDisplay: opponent.goldEarned.formatted()),
-            RadarAxis(label: "KDA", meValue: kda(me), opponentValue: kda(opponent),
-                      meDisplay: String(format: "%.1f", kda(me)), opponentDisplay: String(format: "%.1f", kda(opponent))),
+            RadarAxis(label: "KDA", meValue: me.kda, opponentValue: opponent.kda,
+                      meDisplay: String(format: "%.1f", me.kda), opponentDisplay: String(format: "%.1f", opponent.kda)),
             RadarAxis(label: "Damage taken", meValue: Double(me.damageTaken), opponentValue: Double(opponent.damageTaken),
                       meDisplay: me.damageTaken.formatted(), opponentDisplay: opponent.damageTaken.formatted()),
             RadarAxis(label: "Healing", meValue: Double(me.totalHeal), opponentValue: Double(opponent.totalHeal),
@@ -270,7 +268,7 @@ struct PlayerMatchupView: View {
             }
         }
         .padding(8)
-        .background(Color(.tertiarySystemGroupedBackground))
+        .background(Theme.surfaceRaised)
         .clipShape(RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
     }
 
@@ -293,7 +291,7 @@ struct PlayerMatchupView: View {
                     headToHeadHeader
                     ForEach(Array(opponents.enumerated()), id: \.element.puuid) { index, opponent in
                         headToHeadRow(opponent)
-                            .background(index.isMultiple(of: 2) ? Color.clear : Color(.tertiarySystemGroupedBackground))
+                            .background(index.isMultiple(of: 2) ? Color.clear : Theme.surfaceRaised)
                     }
                 }
                 .denseRowScaling()
@@ -309,10 +307,7 @@ struct PlayerMatchupView: View {
                 .padding(.vertical, 8)
             }
         }
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .cardShadow()
+        .cardSurface()
     }
 
     private var headToHeadHeader: some View {
@@ -355,12 +350,6 @@ struct PlayerMatchupView: View {
     }
 
     // MARK: - Helpers
-
-    private func kda(_ participant: MatchParticipantSummary) -> Double {
-        participant.deaths == 0
-            ? Double(participant.kills + participant.assists)
-            : Double(participant.kills + participant.assists) / Double(participant.deaths)
-    }
 
     private func participation(_ participant: MatchParticipantSummary) -> Double {
         let teamKills = match.participants.filter { $0.teamId == participant.teamId }.map(\.kills).reduce(0, +)

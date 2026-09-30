@@ -30,7 +30,6 @@ struct TrendSummary {
         func average(_ values: [Double]) -> Double {
             values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
         }
-        func minutes(_ match: Match) -> Double { max(Double(match.gameDurationSeconds) / 60, 1) }
         func one(_ value: Double) -> String { String(format: "%.1f", value) }
 
         var signals: [Signal] = []
@@ -48,11 +47,9 @@ struct TrendSummary {
         var laneKills = 0, laneDeaths = 0
         var matchups: [String: (games: Int, wins: Int)] = [:]
         for match in games {
-            guard let me = match.focusParticipant, me.role != "—",
-                  let opponent = match.participants.first(where: { $0.teamId != me.teamId && $0.role == me.role })
-            else { continue }
-            myCS.append(Double(me.creepScore) / minutes(match))
-            theirCS.append(Double(opponent.creepScore) / minutes(match))
+            guard let me = match.focusParticipant, let opponent = match.laneOpponent(of: me) else { continue }
+            myCS.append(Double(me.creepScore) / match.minutes)
+            theirCS.append(Double(opponent.creepScore) / match.minutes)
             if let duel = match.opponentEncounters.first(where: { $0.opponentPuuid == opponent.puuid }) {
                 laneKills += duel.killsOnOpponent
                 laneDeaths += duel.deathsToOpponent
@@ -64,16 +61,16 @@ struct TrendSummary {
         }
         if !myCS.isEmpty {
             let mine = average(myCS), theirs = average(theirCS)
-            signals.append(Signal(label: "CS / min", yours: one(mine), baseline: "opponent \(one(theirs))", isWeakness: mine < theirs - 0.5))
+            signals.append(Signal(label: "Minions / min", yours: one(mine), baseline: "opponent \(one(theirs))", isWeakness: mine < theirs - 0.5))
         }
         if laneKills + laneDeaths > 0 {
             signals.append(Signal(label: "Lane duels won", yours: "\(laneKills)", baseline: "lost \(laneDeaths)", isWeakness: laneDeaths > laneKills))
         }
 
         // Vision against the lobby, per minute so game length doesn't skew it.
-        let myVision = average(games.compactMap { match in match.focusParticipant.map { Double($0.visionScore) / minutes(match) } })
+        let myVision = average(games.compactMap { match in match.focusParticipant.map { Double($0.visionScore) / match.minutes } })
         let lobbyVision = average(games.flatMap { match in
-            match.participants.filter { $0.puuid != match.focusParticipant?.puuid }.map { Double($0.visionScore) / minutes(match) }
+            match.participants.filter { $0.puuid != match.focusParticipant?.puuid }.map { Double($0.visionScore) / match.minutes }
         })
         signals.append(Signal(label: "Vision / min", yours: one(myVision), baseline: "lobby \(one(lobbyVision))", isWeakness: lobbyVision > 0 && myVision < lobbyVision * 0.8))
 

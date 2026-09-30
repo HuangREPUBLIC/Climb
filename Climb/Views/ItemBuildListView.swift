@@ -38,9 +38,6 @@ struct ItemBuildListView: View {
         .task(id: owned) {
             await loadNames()
         }
-        .sheet(item: $selectedItemID) { itemID in
-            ItemDetailView(itemID: itemID)
-        }
     }
 
     private func row(_ itemID: Int) -> some View {
@@ -66,6 +63,10 @@ struct ItemBuildListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
+        .itemPopover(itemID, isPresented: Binding(
+            get: { selectedItemID == itemID },
+            set: { if !$0 { selectedItemID = nil } }
+        ))
         .accessibilityLabel(names[itemID] ?? "Item")
         .accessibilityHint("Shows this item's cost and effect")
     }

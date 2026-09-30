@@ -56,7 +56,7 @@ struct LinkAccountView: View {
                 .padding()
                 .readableContentWidth()
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Theme.background)
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(isFirstLink ? "Link Riot Account" : "Riot Account")
             .navigationBarTitleDisplayMode(.inline)

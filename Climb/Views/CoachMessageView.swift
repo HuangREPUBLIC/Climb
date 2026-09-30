@@ -199,11 +199,8 @@ struct CoachMatchSnapshot: View {
                 }
             }
         }
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .cardShadow()
+        .cardSurface(padding: 12)
         .accessibilityElement(children: .combine)
     }
 

@@ -35,7 +35,7 @@ struct ChampionsView: View {
             .padding()
             .readableContentWidth()
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Theme.background)
         .navigationTitle("Champions")
         .navigationDestination(for: ChampionRoute.self) { route in
             ChampionDetailView(champion: route.champion, position: route.position)
@@ -135,10 +135,10 @@ struct TierBadge: View {
 
     private var tint: Color {
         switch tier {
-        case 0: return .red
-        case 1: return .orange
+        case 0: return Theme.poor
+        case 1: return Theme.orange
         case 2: return .blue
-        case 3: return .green
+        case 3: return Theme.good
         default: return .secondary
         }
     }

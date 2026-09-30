@@ -46,11 +46,9 @@ struct PlayerProfileView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                header
-
                 VStack(spacing: 20) {
+                    header
                     if !matches.isEmpty {
-                        summaryCard
                         if !isYou, accounts.first != nil { compareCard }
                         matchesCard
                     } else if isLoading {
@@ -70,7 +68,7 @@ struct PlayerProfileView: View {
             .padding(.bottom)
             .readableContentWidth()
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Theme.background)
         .navigationTitle("\(riotIdGameName)#\(riotIdTagline)")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $browsedMatch) { match in
@@ -116,39 +114,23 @@ struct PlayerProfileView: View {
 
     // MARK: - Header
 
-    /// The champion this player shows up on most, used as their banner.
-    /// Same treatment as your own profile — see ProfileView.
-    private var bannerChampion: String? {
-        Dictionary(grouping: matches.compactMap(\.leagueStats?.champion)) { $0 }
-            .max { $0.value.count < $1.value.count }?
-            .key
-    }
-
+    /// Same card as your own profile — see ProfileView.
     private var header: some View {
         ProfileBanner(
             profileIconID: profile?.profileIconID,
             level: profile?.summonerLevel,
-            bannerChampion: bannerChampion
+            matches: matches
         ) {
-            VStack(spacing: 12) {
-                BannerTitle(text: "\(riotIdGameName)#\(riotIdTagline)")
-                if let profile {
-                    RankChip(tier: profile.rankTier, division: profile.rankDivision, leaguePoints: profile.leaguePoints)
-                }
+            BannerTitle(text: "\(riotIdGameName)#\(riotIdTagline)")
+            if let profile {
+                RankChip(tier: profile.rankTier, division: profile.rankDivision, leaguePoints: profile.leaguePoints)
             }
+        } footer: {
+            if !matches.isEmpty { StatSummaryCard(matches: matches, embedded: true) }
         }
     }
 
-    // MARK: - Summary
-
-    private var summaryCard: some View {
-        let stats = FriendComparisonService.aggregate(matches)
-        return StatSummaryCard(stats: [
-            .init(icon: "gamecontroller.fill", label: "Games", value: "\(stats.gamesSampled)"),
-            .init(icon: "percent", tint: stats.winRate >= 50 ? Theme.win : Theme.loss, label: "Win rate", value: "\(Int(stats.winRate.rounded()))%"),
-            .init(icon: "bolt.fill", label: "KDA", value: String(format: "%.2f", stats.kda))
-        ])
-    }
+    // MARK: - Compare
 
     /// Their loaded games against your last 20.
     private var compareCard: some View {
@@ -235,36 +217,24 @@ struct PlayerProfileView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Match history").font(.headline)
 
-            LazyVStack(spacing: 0) {
-                ForEach(Array(matches.enumerated()), id: \.element.id) { index, match in
-                    if index > 0 { Divider() }
-                    Button {
-                        browsedMatch = match
-                    } label: {
-                        MatchRowView(match: match)
-                    }
-                    .buttonStyle(PressableButtonStyle())
-                }
+            MatchCardList(matches: matches, open: { browsedMatch = $0 })
 
-                if !reachedEnd {
-                    Divider()
-                    Button {
-                        Task { await loadPage(reset: false) }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if isLoadingMore { ProgressView().controlSize(.small) }
-                            Text(isLoadingMore ? "Loading…" : "Load more")
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.accent)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+            if !reachedEnd {
+                Button {
+                    Task { await loadPage(reset: false) }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isLoadingMore { ProgressView().controlSize(.small) }
+                        Text(isLoadingMore ? "Loading…" : "Load more")
                     }
-                    .buttonStyle(PressableButtonStyle())
-                    .disabled(isLoadingMore)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
                 }
+                .buttonStyle(PressableButtonStyle())
+                .disabled(isLoadingMore)
             }
-            .cardSurface()
         }
     }
 
