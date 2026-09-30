@@ -8,6 +8,19 @@ struct ItemIconView: View {
     @State private var showingDetail = false
 
     var body: some View {
+        if interactive {
+            // A Button rather than a tap gesture, for the press feedback and
+            // the button trait VoiceOver reads.
+            Button { showingDetail = true } label: { icon }
+                .buttonStyle(PressableButtonStyle())
+                .itemPopover(itemID, isPresented: $showingDetail)
+                .accessibilityHint("Shows this item's cost and effect")
+        } else {
+            icon
+        }
+    }
+
+    private var icon: some View {
         RemoteIcon(id: itemID, url: { await DataDragonService.shared.itemIconURL(for: itemID) }) {
             RoundedRectangle(cornerRadius: size * 0.2)
                 .fill(.secondary.opacity(0.12))
@@ -26,10 +39,5 @@ struct ItemIconView: View {
             minHeight: interactive ? 44 : nil
         )
         .contentShape(Rectangle())
-        .onTapGesture {
-            guard interactive else { return }
-            showingDetail = true
-        }
-        .itemPopover(itemID, isPresented: $showingDetail)
     }
 }
