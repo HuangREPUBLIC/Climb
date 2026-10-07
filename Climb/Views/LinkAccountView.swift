@@ -1,12 +1,11 @@
 import SwiftUI
 import SwiftData
 
-/// Links the Riot account and chooses which of its games to sync.
+/// Syncs the linked Riot account, switches to another, and chooses which
+/// games to sync. A new player links through OnboardingView instead.
 ///
-/// Rebuilt on the app's own card language rather than a `Form`, and with the
-/// game picker turned from two bare toggles into rows that say what each game
-/// actually is and when it last synced — this sheet is the first screen a new
-/// player sees, and a settings-style list gave no sense of what linking does.
+/// The app's own card language rather than a `Form`, with the game picker as
+/// rows that say what each game is and when it last synced.
 struct LinkAccountView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -27,19 +26,15 @@ struct LinkAccountView: View {
 
 
     private var existingAccount: LinkedAccount? { accounts.first }
-    private var isFirstLink: Bool { existingAccount == nil }
 
     private var canSync: Bool {
-        !gameName.trimmingCharacters(in: .whitespaces).isEmpty
-            && !tagLine.trimmingCharacters(in: .whitespaces).isEmpty
-            && (syncLeague || syncTFT)
+        RiotIDInput.isComplete(gameName: gameName, tagLine: tagLine) && (syncLeague || syncTFT)
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: Theme.sectionSpacing) {
-                    if isFirstLink { intro }
                     identityCard
                     gamesCard
                     if let errorMessage { ErrorCard(message: errorMessage) }
@@ -58,7 +53,7 @@ struct LinkAccountView: View {
             }
             .background(Theme.background)
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle(isFirstLink ? "Link Riot Account" : "Riot Account")
+            .navigationTitle("Riot Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -74,26 +69,6 @@ struct LinkAccountView: View {
         }
     }
 
-    // MARK: - Intro
-
-    /// Only on a first link. Once an account exists this is just a settings
-    /// sheet and the explanation is noise.
-    private var intro: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "person.crop.circle.badge.checkmark")
-                .font(.largeTitle)
-                .foregroundStyle(Theme.accent)
-            Text("Connect your Riot account")
-                .font(.headline)
-            Text("Climb reads your match history through Riot's public API and keeps it on this device.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 8)
-    }
-
     // MARK: - Identity
 
     private var identityCard: some View {
@@ -101,8 +76,21 @@ struct LinkAccountView: View {
             Text("Riot ID")
                 .font(.headline)
             RiotIDInput(gameName: $gameName, tagLine: $tagLine, platform: $platform, focus: $focusedField)
+            if isSwitchingAccount {
+                Label("This is a different account. Syncing replaces the current match history, AI reviews and notes on this device.", systemImage: "arrow.left.arrow.right")
+                    .font(.caption)
+                    .foregroundStyle(Theme.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .cardSurface()
+    }
+
+    /// The same rule the import uses to drop the old account's games.
+    private var isSwitchingAccount: Bool {
+        guard let existingAccount, !gameName.isEmpty, !tagLine.isEmpty else { return false }
+        return LinkedAccount.identity(gameName: existingAccount.riotGameName, tagLine: existingAccount.riotTagline)
+            != LinkedAccount.identity(gameName: gameName, tagLine: tagLine)
     }
 
     // MARK: - Games
@@ -180,32 +168,14 @@ struct LinkAccountView: View {
 
     // MARK: - Actions
 
-    /// A full-width button in the sheet body rather than a toolbar item: on a
-    /// first link this is the whole point of the screen, and a small "Log In"
-    /// in the corner did not read as the primary action.
+    /// A full-width button in the sheet body rather than a toolbar item: a
+    /// small button in the corner did not read as the primary action.
     private var syncButton: some View {
         VStack(spacing: 8) {
-            Button {
+            PrimaryButton(title: syncButtonTitle, icon: "arrow.triangle.2.circlepath", isWorking: isSyncing, isEnabled: canSync) {
                 focusedField = nil
                 sync()
-            } label: {
-                HStack(spacing: 8) {
-                    if isSyncing {
-                        ProgressView().controlSize(.small).tint(.white)
-                    } else {
-                        Image(systemName: isFirstLink ? "link" : "arrow.triangle.2.circlepath")
-                    }
-                    Text(syncButtonTitle)
-                        .fontWeight(.semibold)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .foregroundStyle(.white)
-                .background(canSync && !isSyncing ? Theme.accent : Color.secondary.opacity(0.4))
-                .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             }
-            .buttonStyle(PressableButtonStyle())
-            .disabled(!canSync || isSyncing)
 
             if isSyncing {
                 Text("Importing matches — this can take a moment on a first sync.")
@@ -218,7 +188,7 @@ struct LinkAccountView: View {
 
     private var syncButtonTitle: String {
         if isSyncing { return "Syncing…" }
-        return isFirstLink ? "Link Account" : "Sync Now"
+        return isSwitchingAccount ? "Switch Account" : "Sync Now"
     }
 
     private func prefill() {

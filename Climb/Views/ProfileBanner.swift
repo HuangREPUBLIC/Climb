@@ -1,22 +1,19 @@
 import SwiftUI
 
 /// The header card of a profile — yours or another player's: portrait, name
-/// and rank on the left, the player's most-played champion on the right, and
-/// the headline numbers along the bottom.
+/// and rank on the left, the player's most-played champion on the right.
 ///
 /// A card inset from the edges rather than splash art bled to the screen
 /// edge: splash art is landscape, and stretched over a tall header it cropped
 /// down to a stray elbow. The champion's portrait loading-screen art fits a
 /// card's side whole instead, fading into the white.
-struct ProfileBanner<Content: View, Footer: View>: View {
+struct ProfileBanner<Content: View>: View {
     let profileIconID: Int?
     let level: Int?
     /// The player's games; the most played champion fronts the card.
     let matches: [Match]
     /// Name, rank and anything else beside the portrait.
     @ViewBuilder let content: () -> Content
-    /// The strip along the bottom, usually `StatSummaryCard(embedded: true)`.
-    @ViewBuilder let footer: () -> Footer
 
     @ScaledMetric(relativeTo: .title2) private var avatarSize: CGFloat = 60
     @ScaledMetric(relativeTo: .title2) private var artWidth: CGFloat = 140
@@ -28,32 +25,28 @@ struct ProfileBanner<Content: View, Footer: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Portrait above the name rather than beside it, so the name and
-            // rank get the card's width up to the art.
-            HStack(alignment: .top, spacing: 0) {
-                VStack(alignment: .leading, spacing: 8) {
-                    avatar
-                        .padding(.bottom, 8)
-                    content()
-                    if let mainChampion {
-                        Text("MAIN · \(mainChampion.name) · \(mainChampion.games) games")
-                            .scaledFont(10, weight: .bold)
-                            .tracking(0.6)
-                            .foregroundStyle(Theme.accent)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
+        // Portrait above the name rather than beside it, so the name and
+        // rank get the card's width up to the art.
+        HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                avatar
+                    .padding(.bottom, 8)
+                content()
+                if let mainChampion {
+                    Text("MAIN · \(mainChampion.name) · \(mainChampion.games) games")
+                        .scaledFont(10, weight: .bold)
+                        .tracking(0.6)
+                        .foregroundStyle(Theme.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
-                // Text stops where the art is still visible.
-                Spacer(minLength: artWidth * 0.75)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
-            .background(alignment: .trailing) { championArt }
-
-            footer()
+            // Text stops where the art is still visible.
+            Spacer(minLength: artWidth * 0.75)
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
+        .background(alignment: .trailing) { championArt }
         .background(Theme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Theme.accent.opacity(0.25), lineWidth: 1))
@@ -110,12 +103,6 @@ struct ProfileBanner<Content: View, Footer: View>: View {
                     .offset(y: 7)
             }
         }
-    }
-}
-
-extension ProfileBanner where Footer == EmptyView {
-    init(profileIconID: Int?, level: Int?, matches: [Match], @ViewBuilder content: @escaping () -> Content) {
-        self.init(profileIconID: profileIconID, level: level, matches: matches, content: content) { EmptyView() }
     }
 }
 
@@ -194,8 +181,6 @@ struct StatSummaryCard: View {
     }
 
     let stats: [Stat]
-    /// A bare row for the bottom of another card, instead of a card of its own.
-    var embedded = false
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title3) private var dividerHeight: CGFloat = 56
@@ -218,7 +203,7 @@ struct StatSummaryCard: View {
                 }
             }
         }
-        .modifier(StatStripSurface(embedded: embedded))
+        .cardSurface()
     }
 
     private func column(_ stat: Stat) -> some View {
@@ -246,42 +231,165 @@ struct StatSummaryCard: View {
     }
 }
 
-/// A card of its own, or a divided strip along the bottom of the banner.
-private struct StatStripSurface: ViewModifier {
-    let embedded: Bool
+/// The headline numbers under a profile banner: win/loss as one horizontal
+/// card, then three tiles — KDA, average rating and the last ten results.
+/// TFT swaps in placements. `matches` is newest first.
+struct ProfileStatsSection: View {
+    let matches: [Match]
 
-    func body(content: Content) -> some View {
-        if embedded {
-            content
-                .padding(.vertical, 14)
-                .padding(.horizontal, 8)
-                .background(Theme.surfaceRaised.opacity(0.6))
-                .overlay(alignment: .top) { Divider() }
-        } else {
-            content.cardSurface()
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var isTFT: Bool { matches.allSatisfy { $0.leagueStats == nil } }
+
+    /// Callers show it only when there are games: an empty list already says
+    /// why, and a card of zeros under it reads as broken.
+    var body: some View {
+        VStack(spacing: 10) {
+            WinLossCard(matches: matches, isTFT: isTFT)
+            // Equal-height tiles: each fills the row, and the row is only
+            // as tall as its tallest tile.
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 10))
+                : AnyLayout(HStackLayout(spacing: 10))
+            layout {
+                if isTFT { tftTiles } else { leagueTiles }
+                lastTenTile
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var leagueTiles: some View {
+        let kda = FriendComparisonService.aggregate(matches).kda
+        StatTile(title: "KDA", icon: "bolt.fill", tint: Theme.kdaColor(kda),
+                 caption: "\(average(\.kills)) / \(average(\.deaths)) / \(average(\.assists)) per game") {
+            Text(String(format: "%.2f", kda))
+                .foregroundStyle(Theme.kdaColor(kda))
+        }
+
+        let scores = matches.compactMap(PerformanceScore.compute(for:))
+        let rating = scores.isEmpty ? nil : scores.reduce(0, +) / Double(scores.count)
+        StatTile(title: "Rating", icon: "star.fill", tint: Theme.accent,
+                 caption: "Out of 10 · lobby average \(String(format: "%.1f", PerformanceScore.lobbyAverage))") {
+            Text(rating.map { String(format: "%.1f", $0) } ?? "—")
+                .foregroundStyle(rating.map(PerformanceScore.color(for:)) ?? .secondary)
+        }
+    }
+
+    /// One decimal, per League game.
+    private func average(_ key: KeyPath<LeagueStats, Int>) -> String {
+        let lines = matches.compactMap(\.leagueStats)
+        return String(format: "%.1f", Double(lines.map { $0[keyPath: key] }.reduce(0, +)) / Double(max(lines.count, 1)))
+    }
+
+    @ViewBuilder
+    private var tftTiles: some View {
+        let placements = matches.compactMap(\.tftStats?.placement)
+        let average = placements.isEmpty ? nil : Double(placements.reduce(0, +)) / Double(placements.count)
+        StatTile(title: "Avg place", icon: "list.number", tint: Theme.teal, caption: "1st is best, out of 8") {
+            Text(average.map { String(format: "#%.1f", $0) } ?? "—")
+                .foregroundStyle(average.map { $0 <= 4 ? Theme.win : Theme.loss } ?? .secondary)
+        }
+        StatTile(title: "Wins", icon: "crown.fill", tint: Theme.fair, caption: "Games finished 1st") {
+            Text("\(placements.filter { $0 == 1 }.count)")
+        }
+    }
+
+    private var lastTen: [Match] { Array(matches.prefix(10).reversed()) }
+
+    private var lastTenTile: some View {
+        let recent = lastTen
+        let wins = recent.filter(\.win).count
+        return StatTile(title: "Last \(recent.count)", icon: "clock.arrow.circlepath", tint: Theme.teal,
+                        caption: "\(wins)W \(recent.count - wins)L · newest on the right") {
+            ResultStrip(matches: recent, maxBarWidth: 10)
+                .frame(height: 26)
         }
     }
 }
 
-extension StatSummaryCard {
-    /// Win rate, KDA and record for a list of games — the same three on your
-    /// own profile and a searched player's. TFT's `win` is a top-4 finish.
-    init(matches: [Match], embedded: Bool = false) {
-        let wins = matches.filter(\.win).count
-        let winRate = matches.isEmpty ? 0 : Double(wins) / Double(matches.count) * 100
-        let isTFT = matches.allSatisfy { $0.leagueStats == nil }
-        let kda = FriendComparisonService.aggregate(matches).kda
+/// Win rate as a number and as a bar split between wins and losses.
+private struct WinLossCard: View {
+    let matches: [Match]
+    let isTFT: Bool
 
-        self.init(stats: [
-            Stat(icon: "percent", tint: winRate >= 50 ? Theme.win : Theme.loss, label: isTFT ? "Top 4 rate" : "Win rate",
-                 value: "\(Int(winRate.rounded()))%", tintsValue: true,
-                 caption: winRate > 50 ? "Wins more than half" : winRate < 50 ? "Wins less than half" : "Exactly half"),
-            isTFT
-                ? Stat(icon: "gamecontroller.fill", tint: Theme.teal, label: "Games", value: "\(matches.count)", caption: "Synced so far")
-                : Stat(icon: "bolt.fill", tint: Theme.kdaColor(kda), label: "KDA ratio", value: String(format: "%.2f", kda),
-                       tintsValue: true, caption: "Takedowns per death · 3+ is good"),
-            Stat(icon: "trophy.fill", tint: Theme.accent, label: "Record",
-                 value: "\(wins)W \(matches.count - wins)L", caption: "\(matches.count) games")
-        ], embedded: embedded)
+    var body: some View {
+        let wins = matches.filter(\.win).count
+        let losses = matches.count - wins
+        let rate = Double(wins) / Double(max(matches.count, 1))
+        let percent = Int((rate * 100).rounded())
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("\(percent)%")
+                        .font(.largeTitle.weight(.heavy).monospacedDigit())
+                        .foregroundStyle(rate >= 0.5 ? Theme.win : Theme.loss)
+                    Text(isTFT ? "Top 4 rate" : "Win rate")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(spacing: 12) {
+                        Text("\(wins) \(isTFT ? "Top 4" : "W")").foregroundStyle(Theme.win)
+                        Text("\(losses) \(isTFT ? "Bot 4" : "L")").foregroundStyle(Theme.loss)
+                    }
+                    .font(.title3.bold().monospacedDigit())
+                    Text("\(matches.count) game\(matches.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            GeometryReader { geo in
+                // No gap when one side is empty, or it shows as a sliver.
+                let gap: CGFloat = wins == 0 || losses == 0 ? 0 : 3
+                HStack(spacing: gap) {
+                    Capsule().fill(Theme.win.gradient)
+                        .frame(width: max((geo.size.width - gap) * rate, 0))
+                    Capsule().fill(Theme.loss.gradient)
+                }
+            }
+            .frame(height: 10)
+        }
+        .cardSurface()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(isTFT ? "Top 4 rate" : "Win rate") \(percent) percent: \(wins) \(isTFT ? "top 4" : "wins"), \(losses) \(isTFT ? "bottom 4" : "losses"), \(matches.count) games")
+    }
+}
+
+/// A small stat card: a label, a big value and a plain-language line.
+private struct StatTile<Value: View>: View {
+    let title: String
+    let icon: String
+    let tint: Color
+    let caption: String
+    @ViewBuilder let value: () -> Value
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: icon).foregroundStyle(tint)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            value()
+                .font(.title2.weight(.bold).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Spacer(minLength: 0)
+            Text(caption)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .cardSurface(padding: 12)
+        .accessibilityElement(children: .combine)
     }
 }

@@ -25,36 +25,42 @@ enum Theme {
 
     // MARK: - Colour
 
-    /// Always light: cream page, white cards, the League client's gold and
-    /// teal as accents. Navy is kept for a few feature cards (`navyGradient`).
+    /// Always light: a cool off-white page, white cards, and a vivid
+    /// blue-violet accent. The cream-and-deep-gold palette before it read as
+    /// grey and flat; this one is meant to look like an esports app.
     /// Forced in `ClimbApp`, so these are fixed values, not adaptive.
-    static let background = Color(red: 0.961, green: 0.953, blue: 0.933)   // #F5F3EE
+    static let background = Color(red: 0.965, green: 0.969, blue: 0.984)   // #F6F7FB
     static let surface = Color.white
-    static let surfaceRaised = Color(red: 0.945, green: 0.937, blue: 0.914) // #F1EFE9
+    static let surfaceRaised = Color(red: 0.933, green: 0.941, blue: 0.969) // #EEF0F7
     static let hairline = Color.black.opacity(0.06)
 
-    /// Deep gold #A8863F, dark enough to read on white. Also the root
-    /// `.tint`, and the AccentColor asset holds the same value for the tint
-    /// UIKit draws itself (alert buttons).
-    static let accent = Color(red: 0.659, green: 0.525, blue: 0.247)
-    /// The client's own lighter gold, for text on navy.
-    static let goldOnDark = Color(red: 0.784, green: 0.667, blue: 0.431)    // #C8AA6E
-    static let teal = Color(red: 0.039, green: 0.620, blue: 0.576)          // #0A9E93
-
-    static let navy = Color(red: 0.039, green: 0.078, blue: 0.157)          // #0A1428
-    static let navyGradient = LinearGradient(
-        colors: [navy, Color(red: 0.102, green: 0.161, blue: 0.259)],      // → #1A2942
+    /// Indigo #5B5BF6, 4.9:1 on white. Also the root `.tint`, and the
+    /// AccentColor asset holds the same value for the tint UIKit draws itself
+    /// (alert buttons).
+    static let accent = Color(red: 0.357, green: 0.357, blue: 0.965)
+    static let violet = Color(red: 0.545, green: 0.361, blue: 0.965)        // #8B5CF6
+    /// The selected tab, primary buttons and hero cards.
+    static let accentGradient = LinearGradient(
+        colors: [accent, violet],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
+    /// Amber for labels and highlights on the gradient and on dark art.
+    static let goldOnDark = Color(red: 0.984, green: 0.749, blue: 0.141)    // #FBBF24
+    static let teal = Color(red: 0.024, green: 0.714, blue: 0.831)          // #06B6D4
 
-    /// Traffic light. The system green and yellow wash out as text on white,
-    /// so these are darkened until they read.
-    static let good = Color(red: 0.13, green: 0.60, blue: 0.33)
-    static let fair = Color(red: 0.72, green: 0.51, blue: 0.0)
-    static let poor = Color(red: 0.85, green: 0.20, blue: 0.20)
+    /// Image placeholders and the backdrop behind splash art.
+    static let navy = Color(red: 0.059, green: 0.071, blue: 0.180)          // #0F122E
+
+    /// Traffic light: saturated, but each still reads as text on white.
+    static let good = Color(red: 0.055, green: 0.624, blue: 0.431)          // #0E9F6E
+    static let fair = Color(red: 0.851, green: 0.467, blue: 0.024)          // #D97706
+    static let poor = Color(red: 0.882, green: 0.114, blue: 0.282)          // #E11D48
     /// For white text on orange, which the system orange is too light for.
-    static let orange = Color(red: 0.85, green: 0.42, blue: 0.0)
+    static let orange = Color(red: 0.918, green: 0.345, blue: 0.047)        // #EA580C
+    /// Win and loss on the gradient, where the text-on-white shades go muddy.
+    static let winBright = Color(red: 0.204, green: 0.827, blue: 0.600)     // #34D399
+    static let lossBright = Color(red: 0.984, green: 0.443, blue: 0.522)    // #FB7185
 
     /// Team colours are semantic, not decorative — they map to the game's
     /// own blue-side / red-side language, so they stay distinct from accent.
@@ -251,5 +257,87 @@ struct ErrorCard: View {
         .background(Theme.loss.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .cardShadow()
+    }
+}
+
+/// What a card says when it has nothing to show yet, in place of zeros or a
+/// blank chart that read as broken.
+struct EmptyStateCard: View {
+    let icon: String
+    let title: String
+    let message: String
+    /// 0...1 when the empty state is a countdown ("3 of 5 games").
+    var progress: Double?
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(Theme.accentGradient)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if let progress {
+                ProgressView(value: progress)
+                    .tint(Theme.accent)
+                    .padding(.top, 4)
+                    .padding(.horizontal, 24)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .cardSurface()
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A chart legend entry: a coloured dot and its label.
+struct LegendDot: View {
+    let color: Color
+    let label: String
+
+    @ScaledMetric(relativeTo: .caption2) private var size: CGFloat = 6
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: size, height: size)
+            Text(label).scaledFont(10).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// The full-width gradient button for a screen's main action, with a
+/// spinner while it works.
+struct PrimaryButton: View {
+    let title: String
+    var icon: String?
+    var isWorking = false
+    var isEnabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isWorking {
+                    ProgressView().controlSize(.small).tint(.white)
+                } else if let icon {
+                    Image(systemName: icon)
+                }
+                Text(title).fontWeight(.semibold)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 15)
+            .foregroundStyle(.white)
+            .background(
+                isEnabled && !isWorking ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.secondary.opacity(0.4)),
+                in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            )
+        }
+        .buttonStyle(PressableButtonStyle())
+        .disabled(!isEnabled || isWorking)
     }
 }

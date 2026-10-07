@@ -116,10 +116,10 @@ enum CoachService {
         [
             "Answer in this shape, and keep it short — the player is reading on a phone:",
             "1. One sentence of verdict, under 140 characters, on its own first line.",
-            "2. Up to three findings, each on its own line starting with '- ', one clause each.",
+            "2. Up to three findings, each on its own line starting with '- ' and a tag: '[+area]' for something that went well, '[-area]' for something that cost them, where area is one of \(CoachReply.Finding.Area.allCases.map(\.rawValue).joined(separator: ", ")). One clause each, e.g. '- [-vision] 0.6 vision per minute, half the lobby's 1.2'. Include a strength when the numbers show one.",
             "3. One line starting with 'Try:' naming a single concrete thing to do next game.",
             "Cite the player's actual numbers inside the findings. No headings, no preamble, no sign-off.",
-            "Write in \(replyLanguage), but keep the '- ' markers and the literal 'Try:' prefix so the app can lay the reply out."
+            "Write in \(replyLanguage), but keep the '- ' markers, the English [+area]/[-area] tags and the literal 'Try:' prefix so the app can lay the reply out."
         ]
     }
 

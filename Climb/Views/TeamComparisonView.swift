@@ -56,62 +56,21 @@ struct TeamComparisonView: View {
     /// Gold lead over time — the shape of the game, not just its final score.
     /// Built from timeline participant frames captured at import.
     private var goldDifferenceCard: some View {
-        let points = match.goldTimeline.sorted { $0.minute < $1.minute }
-        let peak = max(points.map { abs($0.goldDifference) }.max() ?? 1000, 1000)
+        let last = match.goldTimeline.max { $0.minute < $1.minute }
 
         return sectionCard {
             HStack {
                 Text("Gold difference").font(.headline)
                 Spacer()
-                if let last = points.last {
+                if let last {
                     Text(last.goldDifference >= 0 ? "+\(last.goldDifference)" : "\(last.goldDifference)")
                         .font(.subheadline.weight(.bold).monospacedDigit())
-                        .foregroundStyle(last.goldDifference >= 0 ? .blue : .red)
+                        .foregroundStyle(last.goldDifference >= 0 ? Theme.good : Theme.poor)
                 }
             }
 
-            Chart {
-                ForEach(points) { point in
-                    AreaMark(
-                        x: .value("Minute", point.minute),
-                        y: .value("Gold", point.goldDifference)
-                    )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.blue.opacity(0.28), .blue.opacity(0.02)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    LineMark(
-                        x: .value("Minute", point.minute),
-                        y: .value("Gold", point.goldDifference)
-                    )
-                    .foregroundStyle(.blue)
-                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
-                }
-                RuleMark(y: .value("Even", 0))
-                    .foregroundStyle(.secondary.opacity(0.5))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-            }
-            .chartYScale(domain: -peak...peak)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 5)) { value in
-                    AxisGridLine().foregroundStyle(.quaternary)
-                    AxisValueLabel {
-                        if let minute = value.as(Int.self) {
-                            Text("\(minute)m").scaledFont(9)
-                        }
-                    }
-                }
-            }
-            .chartYAxis {
-                AxisMarks(values: .automatic(desiredCount: 3)) { _ in
-                    AxisGridLine().foregroundStyle(.quaternary)
-                    AxisValueLabel()
-                }
-            }
-            .frame(height: chartHeight)
+            GoldLeadChart(points: match.goldTimeline)
+                .frame(height: chartHeight)
 
             Text("Above the line = your team ahead")
                 .scaledFont(9)
@@ -376,5 +335,62 @@ struct TeamComparisonView: View {
             content()
         }
         .cardSurface()
+    }
+}
+
+/// Your team's gold lead by minute: above the line ahead, below behind.
+/// Shared by the Team tab and the AI review.
+struct GoldLeadChart: View {
+    let points: [GoldTimelinePoint]
+
+    var body: some View {
+        let points = points.sorted { $0.minute < $1.minute }
+        let peak = max(points.map { abs($0.goldDifference) }.max() ?? 1000, 1000)
+        Chart {
+            ForEach(points) { point in
+                // Split at zero so a lead fills green and a deficit red.
+                AreaMark(
+                    x: .value("Minute", point.minute),
+                    y: .value("Gold", max(point.goldDifference, 0)),
+                    series: .value("Side", "ahead"),
+                    stacking: .unstacked
+                )
+                .foregroundStyle(Theme.good.opacity(0.25))
+                AreaMark(
+                    x: .value("Minute", point.minute),
+                    y: .value("Gold", min(point.goldDifference, 0)),
+                    series: .value("Side", "behind"),
+                    stacking: .unstacked
+                )
+                .foregroundStyle(Theme.poor.opacity(0.25))
+                LineMark(
+                    x: .value("Minute", point.minute),
+                    y: .value("Gold", point.goldDifference),
+                    series: .value("Side", "lead")
+                )
+                .foregroundStyle(Theme.accent)
+                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+            }
+            RuleMark(y: .value("Even", 0))
+                .foregroundStyle(.secondary.opacity(0.5))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        }
+        .chartYScale(domain: -peak...peak)
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                AxisGridLine().foregroundStyle(.quaternary)
+                AxisValueLabel {
+                    if let minute = value.as(Int.self) {
+                        Text("\(minute)m").scaledFont(9)
+                    }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks(values: .automatic(desiredCount: 3)) { _ in
+                AxisGridLine().foregroundStyle(.quaternary)
+                AxisValueLabel()
+            }
+        }
     }
 }

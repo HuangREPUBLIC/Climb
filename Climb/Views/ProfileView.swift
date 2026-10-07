@@ -43,15 +43,20 @@ struct ProfileView: View {
     }
 
     var body: some View {
+        let filtered = filteredMatches
         ScrollView {
             VStack(spacing: 16) {
                 VStack(spacing: 16) {
                     header
                     unpublishedMatchNotice
+                    // The numbers follow the filters, so picking "Ranked
+                    // Solo/Duo" answers "how am I doing in ranked".
+                    if !filtered.isEmpty { ProfileStatsSection(matches: filtered) }
                 }
                 .padding(.horizontal)
 
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !matches.isEmpty { recentMatchesHeading(count: filtered.count) }
                     if queues.count > 1 {
                         TagFilterBar(tags: queues, selection: $queueFilter)
                     }
@@ -65,9 +70,9 @@ struct ProfileView: View {
                         ContentUnavailableView(
                             "No matches yet",
                             systemImage: "gamecontroller",
-                            description: Text("Link a Riot account to import your match history.")
+                            description: Text("Riot has no recent games for this account. Pull down to check again after you play.")
                         )
-                    } else if filteredMatches.isEmpty {
+                    } else if filtered.isEmpty {
                         ContentUnavailableView(
                             "No matches for this filter",
                             systemImage: "line.3.horizontal.decrease",
@@ -75,12 +80,12 @@ struct ProfileView: View {
                         )
                     } else {
                         MatchCardList(
-                            matches: filteredMatches,
+                            matches: filtered,
                             open: { path.append($0) },
                             editTags: { taggingMatch = $0 }
                         )
                     }
-                    if selectedGame == .league, account != nil, !matches.isEmpty {
+                    if selectedGame == .league, !matches.isEmpty {
                         loadOlderButton
                     }
                 }
@@ -107,7 +112,7 @@ struct ProfileView: View {
                 } label: {
                     Image(systemName: "arrow.triangle.2.circlepath")
                 }
-                .accessibilityLabel(account == nil ? "Link Riot account" : "Sync Riot account")
+                .accessibilityLabel("Sync or switch Riot account")
             }
         }
         .sheet(isPresented: $showingLinkAccount) {
@@ -124,28 +129,36 @@ struct ProfileView: View {
 
     // MARK: - Header
 
-    /// The numbers follow the filters, so picking "Ranked Solo/Duo" answers
-    /// "how am I doing in ranked" without a separate screen.
     private var header: some View {
         ProfileBanner(
             profileIconID: account?.profileIconID,
             level: account?.summonerLevel,
             matches: matches
         ) {
+            // ContentView shows onboarding until there is an account.
             if let account {
                 BannerTitle(text: account.riotID)
                 RankChip(tier: account.rankTier, division: account.rankDivision, leaguePoints: account.leaguePoints)
-            } else {
-                Text("No Riot account linked")
-                    .font(.title3.bold())
-                Button("Link Riot Account") {
-                    showingLinkAccount = true
-                }
-                .buttonStyle(.borderedProminent)
             }
-        } footer: {
-            if !matches.isEmpty { StatSummaryCard(matches: filteredMatches, embedded: true) }
         }
+    }
+
+    /// Names the list, and says how many games the filters leave.
+    private func recentMatchesHeading(count: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Recent Matches")
+                .font(.title3.bold())
+            Text("\(count)")
+                .font(.subheadline.weight(.bold).monospacedDigit())
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Theme.accent.opacity(0.12), in: Capsule())
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 
     /// Riot's match API can run behind the account itself — event queues in
@@ -182,22 +195,13 @@ struct ProfileView: View {
         }
     }
 
-    /// A button, not infinite scroll: each page costs ~40 requests against a
-    /// personal key's 100 per two minutes, so loading more is a deliberate act.
+    /// Scrolling to the end of the list loads the next page; the button is
+    /// for a retry, and for a filtered list, where reaching the end isn't a
+    /// request for more (each page costs ~40 of a personal key's 100 requests
+    /// per two minutes).
     private var loadOlderButton: some View {
         Button {
-            isLoadingOlder = true
-            Task {
-                do {
-                    let added = try await MatchImportService.loadOlderMatches(context: modelContext)
-                    reachedEnd = added == 0
-                    olderLoadFailed = false
-                } catch {
-                    // A rate limit isn't the end of history — offer a retry.
-                    olderLoadFailed = true
-                }
-                isLoadingOlder = false
-            }
+            loadOlder()
         } label: {
             HStack(spacing: 8) {
                 if isLoadingOlder { ProgressView().controlSize(.small) }
@@ -213,6 +217,26 @@ struct ProfileView: View {
         }
         .buttonStyle(PressableButtonStyle())
         .disabled(isLoadingOlder)
+        .onScrollVisibilityChange(threshold: 0.5) { visible in
+            // A failure waits for a tap, so a rate limit can't loop.
+            if visible, !reachedEnd, !olderLoadFailed, queueFilter == nil, tagFilter == nil { loadOlder() }
+        }
+    }
+
+    private func loadOlder() {
+        guard !isLoadingOlder else { return }
+        isLoadingOlder = true
+        Task {
+            do {
+                let added = try await MatchImportService.loadOlderMatches(context: modelContext)
+                reachedEnd = added == 0
+                olderLoadFailed = false
+            } catch {
+                // A rate limit isn't the end of history — offer a retry.
+                olderLoadFailed = true
+            }
+            isLoadingOlder = false
+        }
     }
 }
 

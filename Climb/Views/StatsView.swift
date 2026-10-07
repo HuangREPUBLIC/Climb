@@ -61,7 +61,6 @@ struct StatsView: View {
     @ScaledMetric(relativeTo: .subheadline) private var winRateColumnWidth: CGFloat = 46
     @ScaledMetric(relativeTo: .caption) private var countColumnWidth: CGFloat = 30
     @ScaledMetric(relativeTo: .caption) private var listPortraitSize: CGFloat = 32
-    @ScaledMetric(relativeTo: .caption2) private var legendDotSize: CGFloat = 6
     /// Charts grow with the text so their axis labels stay proportionate
     /// rather than crowding a fixed-height plot.
     @ScaledMetric(relativeTo: .caption) private var chartHeight: CGFloat = 150
@@ -76,15 +75,27 @@ struct StatsView: View {
                 ContentUnavailableView(
                     "No stats yet",
                     systemImage: "chart.line.uptrend.xyaxis",
-                    description: Text("Link a Riot account and sync some matches to see trends.")
+                    description: Text("Play a few games, then pull down on Matches to sync them. Trends fill in from there.")
                 )
             } else {
                 ScrollView {
                     // Across every mode, so it sits above the mode filter.
-                    let ownLeague = gameMatches.filter { $0.leagueStats != nil }.reversed()
-                    if selectedGame == .league, ownLeague.count >= 5 {
-                        TrendDiagnosisCard(matches: Array(ownLeague))
+                    let ownLeague = Array(gameMatches.filter { $0.leagueStats != nil }.reversed())
+                    let trend = TrendSummary(matches: ownLeague)
+                    // The card's own count: games with a full scoreboard.
+                    let trendGames = trend.games
+                    if selectedGame == .league, trendGames >= TrendSummary.minimumGames {
+                        TrendDiagnosisCard(summary: trend, newestID: ownLeague.first?.id)
                             .padding([.horizontal, .top])
+                    } else if selectedGame == .league, !ownLeague.isEmpty {
+                        let left = TrendSummary.minimumGames - trendGames
+                        EmptyStateCard(
+                            icon: "sparkles",
+                            title: "AI trend analysis unlocks at \(TrendSummary.minimumGames) games",
+                            message: "Play \(left) more game\(left == 1 ? "" : "s") and the coach will look for what keeps costing you wins.",
+                            progress: Double(trendGames) / Double(TrendSummary.minimumGames)
+                        )
+                        .padding([.horizontal, .top])
                     }
                     if queues.count > 1 {
                         TagFilterBar(tags: queues, selection: $queueFilter)
@@ -92,7 +103,10 @@ struct StatsView: View {
                     VStack(alignment: .leading, spacing: Theme.sectionSpacing) {
                         if !leagueMatches.isEmpty {
                             StatsBento(matches: leagueMatches)
-                            section("KDA ratio by game") { kdaChart }
+                            // One bar isn't a trend.
+                            if leagueMatches.count >= 2 {
+                                section("KDA ratio by game") { kdaChart }
+                            }
                             section("Champions") { championTable }
                             section("Win rate by role") { roleChart }
                         }
@@ -108,7 +122,9 @@ struct StatsView: View {
 
                         if !tftMatches.isEmpty {
                             placementHeadlineCard
-                            section("Placement trend") { placementChart }
+                            if tftMatches.count >= 2 {
+                                section("Placement trend") { placementChart }
+                            }
                         }
                     }
                     .padding()
@@ -326,8 +342,8 @@ struct StatsView: View {
 
         // One row with the caption pushed right, until the text is large enough
         // that the two would collide — then it wraps.
-        let legend = legendDot(color: Theme.win, label: "Win")
-        let lossLegend = legendDot(color: Theme.loss, label: "Loss")
+        let legend = LegendDot(color: Theme.win, label: "Win")
+        let lossLegend = LegendDot(color: Theme.loss, label: "Loss")
         let caption = Text("oldest → newest").scaledFont(9).foregroundStyle(.tertiary)
         if dynamicTypeSize.isAccessibilitySize {
             FlowLayout(spacing: 12) { legend; lossLegend; caption }
@@ -341,12 +357,6 @@ struct StatsView: View {
         }
     }
 
-    private func legendDot(color: Color, label: String) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: legendDotSize, height: legendDotSize)
-            Text(label).scaledFont(10).foregroundStyle(.secondary)
-        }
-    }
 
     @ViewBuilder
     private var roleChart: some View {

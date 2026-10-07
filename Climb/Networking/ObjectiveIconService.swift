@@ -2,8 +2,7 @@ import Foundation
 
 /// Real in-game objective art (each elemental drake has its own icon), pulled
 /// from CommunityDragon's minimap icon set. Data Dragon ships no objective
-/// art at all, which is why this uses the community mirror the same way
-/// RankEmblemService does for rank emblems.
+/// art at all, which is why this uses the community mirror.
 enum ObjectiveIconService {
     private static let base = "https://raw.communitydragon.org/latest/game/assets/ux/minimap/icons"
 

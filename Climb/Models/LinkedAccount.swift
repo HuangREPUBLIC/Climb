@@ -43,6 +43,13 @@ final class LinkedAccount {
 
     var riotID: String { "\(riotGameName)#\(riotTagline)" }
 
+    /// Two spellings of one Riot ID compare equal: Riot's lookup ignores case
+    /// and spaces, so "Hideonbush#kr1" finds the account whose games say
+    /// "Hide on bush#KR1".
+    static func identity(gameName: String, tagLine: String) -> String {
+        "\(gameName)#\(tagLine)".lowercased().filter { !$0.isWhitespace }
+    }
+
     func lastSyncDate(for game: Game) -> Date? {
         switch game {
         case .league: return lastLeagueSyncDate

@@ -8,6 +8,11 @@ import SwiftUI
 struct RiotIDInput: View {
     enum Field { case name, tag }
 
+    /// Both halves filled in.
+    static func isComplete(gameName: String, tagLine: String) -> Bool {
+        !gameName.trimmingCharacters(in: .whitespaces).isEmpty && !tagLine.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     @Binding var gameName: String
     @Binding var tagLine: String
     @Binding var platform: RiotPlatform

@@ -10,6 +10,9 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Query private var accounts: [LinkedAccount]
+    /// See OnboardingView.isLinking.
+    @State private var isLinking = false
 
     /// The tab and the Matches stack are owned here rather than inside each
     /// screen, because a tapped notification has to be able to switch tabs and
@@ -22,6 +25,10 @@ struct ContentView: View {
     @State private var keyboardShown = false
     /// Set by a screen that wants the whole height; see `hidesTabBar()`.
     @State private var screenHidesBar = false
+    /// The bar's measured height. Its safe-area inset doesn't reach the
+    /// tabs' scroll views, so they get it as a bottom margin instead — or the
+    /// end of every list ("Load older matches") sits under the bar.
+    @State private var barHeight: CGFloat = 0
 
     @ObservedObject private var router = NotificationRouter.shared
     @ObservedObject private var keyPrompt = APIKeyPrompt.shared
@@ -49,8 +56,48 @@ struct ContentView: View {
     }
 
     var body: some View {
-        // TabView still owns each tab's lifetime and navigation state; only
-        // its bar is swapped for ClimbTabBar.
+        Group {
+            if accounts.isEmpty || isLinking {
+                OnboardingView(isLinking: $isLinking)
+            } else {
+                tabs
+            }
+        }
+        .sheet(isPresented: $keyPrompt.riotKeyRejected) {
+            NavigationStack {
+                APIKeysView(reason: "Riot rejected the API key. Personal keys expire after 24 hours — paste today's to keep syncing.")
+            }
+        }
+        .task {
+            APIKeys.seedFromSecretsIfNeeded()
+            NotificationRouter.shared.start()
+            #if DEBUG
+            PerformanceScore.selfCheck()
+            MatchRowView.selfCheck()
+            OPGGNotation.selfCheck()
+            CoachReply.selfCheck()
+            assert(LinkedAccount.identity(gameName: "Hideonbush", tagLine: "kr1") == LinkedAccount.identity(gameName: "Hide on bush", tagLine: "KR1"), "Riot ID ignores case and spaces")
+            #endif
+            // Notification permission is requested in context — right before the
+            // first reflection reminder is actually scheduled, in
+            // NotificationService.scheduleReflectionReminder — rather than here
+            // on cold launch, before the player has linked an account or has any
+            // reason to know what the permission is for.
+            // A cold launch from a notification records the id before this view
+            // exists, so the pending value is consumed here as well as on change.
+            consumePendingMatch()
+            // Backfills newly-tracked fields on existing matches without the
+            // user having to re-enter their Riot ID.
+            await MatchImportService.refreshIfNeeded(context: modelContext)
+        }
+        .onChange(of: router.pendingMatchID) {
+            consumePendingMatch()
+        }
+    }
+
+    /// TabView still owns each tab's lifetime and navigation state; only its
+    /// bar is swapped for ClimbTabBar.
+    private var tabs: some View {
         TabView(selection: $selectedTab) {
             NavigationStack(path: $matchPath) {
                 ProfileView(path: $matchPath)
@@ -76,8 +123,12 @@ struct ContentView: View {
             .toolbar(.hidden, for: .tabBar)
             .tag(Tab.search)
         }
+        .contentMargins(.bottom, keyboardShown || screenHidesBar ? 0 : barHeight, for: .scrollContent)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !keyboardShown && !screenHidesBar { ClimbTabBar(selection: $selectedTab) }
+            if !keyboardShown && !screenHidesBar {
+                ClimbTabBar(selection: $selectedTab)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { barHeight = $0 }
+            }
         }
         .onPreferenceChange(TabBarHiddenKey.self) { screenHidesBar = $0 }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -85,34 +136,6 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardShown = false
-        }
-        .sheet(isPresented: $keyPrompt.riotKeyRejected) {
-            NavigationStack {
-                APIKeysView(reason: "Riot rejected the API key. Personal keys expire after 24 hours — paste today's to keep syncing.")
-            }
-        }
-        .task {
-            APIKeys.seedFromSecretsIfNeeded()
-            NotificationRouter.shared.start()
-            #if DEBUG
-            PerformanceScore.selfCheck()
-            MatchRowView.selfCheck()
-            OPGGNotation.selfCheck()
-            #endif
-            // Notification permission is requested in context — right before the
-            // first reflection reminder is actually scheduled, in
-            // NotificationService.scheduleReflectionReminder — rather than here
-            // on cold launch, before the player has linked an account or has any
-            // reason to know what the permission is for.
-            // A cold launch from a notification records the id before this view
-            // exists, so the pending value is consumed here as well as on change.
-            consumePendingMatch()
-            // Backfills newly-tracked fields on existing matches without the
-            // user having to re-enter their Riot ID.
-            await MatchImportService.refreshIfNeeded(context: modelContext)
-        }
-        .onChange(of: router.pendingMatchID) {
-            consumePendingMatch()
         }
     }
 
@@ -144,8 +167,8 @@ extension View {
     func hidesTabBar() -> some View { preference(key: TabBarHiddenKey.self, value: true) }
 }
 
-/// The floating bottom bar: a white capsule where the selected tab is a gold
-/// pill with its name, and the others are icons only.
+/// The floating bottom bar: a white capsule where the selected tab is a
+/// gradient pill with its name, and the others are icons only.
 private struct ClimbTabBar: View {
     @Binding var selection: ContentView.Tab
     @Namespace private var pill
@@ -173,7 +196,7 @@ private struct ClimbTabBar: View {
                     .background {
                         if selected {
                             Capsule()
-                                .fill(Theme.accent)
+                                .fill(Theme.accentGradient)
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }

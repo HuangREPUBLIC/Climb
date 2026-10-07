@@ -4,15 +4,26 @@ import Foundation
 /// here, deterministically, so the numbers on screen are exact and the AI
 /// only has to explain them rather than invent them.
 struct TrendSummary {
-    /// One comparison the card can show: "Deaths per game 7.1 · lobby 5.4".
+    /// Fewer games than this and a "pattern" is one bad night.
+    static let minimumGames = 5
+
+    /// One comparison the card draws as two bars: "Deaths per game — you
+    /// 7.1, lobby 5.4".
     struct Signal: Identifiable {
         let label: String
-        let yours: String
-        /// What `yours` is measured against, already worded: "lobby 5.4".
-        let baseline: String
+        let mine: Double
+        let theirs: Double
+        var mineLabel = "You"
+        /// What `mine` is measured against: "Lobby", "Opponent".
+        let theirsLabel: String
+        var digits = 1
         /// True when the player is clearly worse than the baseline.
         let isWeakness: Bool
         var id: String { label }
+
+        var yours: String { String(format: "%.\(digits)f", mine) }
+        /// Worded for the prompt: "lobby 5.4".
+        var baseline: String { "\(theirsLabel.lowercased()) \(String(format: "%.\(digits)f", theirs))" }
     }
 
     let games: Int
@@ -30,8 +41,6 @@ struct TrendSummary {
         func average(_ values: [Double]) -> Double {
             values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
         }
-        func one(_ value: Double) -> String { String(format: "%.1f", value) }
-
         var signals: [Signal] = []
         var lines: [String] = []
 
@@ -40,7 +49,7 @@ struct TrendSummary {
         let lobbyDeaths = average(games.flatMap { match in
             match.participants.filter { $0.puuid != match.focusParticipant?.puuid }.map { Double($0.deaths) }
         })
-        signals.append(Signal(label: "Deaths per game", yours: one(myDeaths), baseline: "lobby \(one(lobbyDeaths))", isWeakness: lobbyDeaths > 0 && myDeaths > lobbyDeaths * 1.2))
+        signals.append(Signal(label: "Deaths per game", mine: myDeaths, theirs: lobbyDeaths, theirsLabel: "Lobby", isWeakness: lobbyDeaths > 0 && myDeaths > lobbyDeaths * 1.2))
 
         // Farming against the lane opponent, the only fair comparison.
         var myCS: [Double] = [], theirCS: [Double] = []
@@ -61,10 +70,10 @@ struct TrendSummary {
         }
         if !myCS.isEmpty {
             let mine = average(myCS), theirs = average(theirCS)
-            signals.append(Signal(label: "Minions / min", yours: one(mine), baseline: "opponent \(one(theirs))", isWeakness: mine < theirs - 0.5))
+            signals.append(Signal(label: "Minions / min", mine: mine, theirs: theirs, theirsLabel: "Opponent", isWeakness: mine < theirs - 0.5))
         }
         if laneKills + laneDeaths > 0 {
-            signals.append(Signal(label: "Lane duels won", yours: "\(laneKills)", baseline: "lost \(laneDeaths)", isWeakness: laneDeaths > laneKills))
+            signals.append(Signal(label: "Lane duels", mine: Double(laneKills), theirs: Double(laneDeaths), mineLabel: "Won", theirsLabel: "Lost", digits: 0, isWeakness: laneDeaths > laneKills))
         }
 
         // Vision against the lobby, per minute so game length doesn't skew it.
@@ -72,7 +81,7 @@ struct TrendSummary {
         let lobbyVision = average(games.flatMap { match in
             match.participants.filter { $0.puuid != match.focusParticipant?.puuid }.map { Double($0.visionScore) / match.minutes }
         })
-        signals.append(Signal(label: "Vision / min", yours: one(myVision), baseline: "lobby \(one(lobbyVision))", isWeakness: lobbyVision > 0 && myVision < lobbyVision * 0.8))
+        signals.append(Signal(label: "Vision / min", mine: myVision, theirs: lobbyVision, theirsLabel: "Lobby", isWeakness: lobbyVision > 0 && myVision < lobbyVision * 0.8))
 
         // Leads that turned into losses: ahead by 1,500+ gold at 15 minutes.
         var ahead = 0, thrown = 0
@@ -82,7 +91,7 @@ struct TrendSummary {
             if !match.win { thrown += 1 }
         }
         if ahead > 0 {
-            signals.append(Signal(label: "Leads at 15 lost", yours: "\(thrown)", baseline: "of \(ahead)", isWeakness: thrown * 2 >= ahead))
+            signals.append(Signal(label: "Leads at 15 thrown", mine: Double(thrown), theirs: Double(ahead), mineLabel: "Thrown", theirsLabel: "Leads", digits: 0, isWeakness: thrown * 2 >= ahead))
         }
 
         self.signals = signals

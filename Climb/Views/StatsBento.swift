@@ -130,13 +130,13 @@ private struct WinRateHero: View {
     var body: some View {
         let wins = matches.filter(\.win).count
         let rate = matches.isEmpty ? 0 : Double(wins) / Double(matches.count)
-        let tint = rate >= 0.5 ? Theme.win : Theme.loss
+        let tint = rate >= 0.5 ? Theme.winBright : Theme.lossBright
         let recent = Array(matches.suffix(10))
 
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 20) {
                 ZStack {
-                    Circle().stroke(.white.opacity(0.1), lineWidth: 11)
+                    Circle().stroke(.white.opacity(0.2), lineWidth: 11)
                     Circle()
                         .trim(from: 0, to: rate)
                         .stroke(tint.gradient, style: StrokeStyle(lineWidth: 11, lineCap: .round))
@@ -161,10 +161,10 @@ private struct WinRateHero: View {
                     if let streak {
                         Label(streak.text, systemImage: streak.won ? "flame.fill" : "snowflake")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(streak.won ? Color.orange : Color.cyan)
+                            .foregroundStyle(streak.won ? Theme.goldOnDark : .white)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background((streak.won ? Color.orange : Color.cyan).opacity(0.15), in: Capsule())
+                            .background(.black.opacity(0.2), in: Capsule())
                     }
                 }
                 Spacer(minLength: 0)
@@ -176,25 +176,18 @@ private struct WinRateHero: View {
                         .scaledFont(9, weight: .semibold)
                         .tracking(0.5)
                         .foregroundStyle(.secondary)
-                    HStack(spacing: 4) {
-                        ForEach(Array(recent.enumerated()), id: \.offset) { _, match in
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(match.win ? Theme.win : Theme.loss)
-                                .frame(height: 22)
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
+                    ResultStrip(matches: recent, win: Theme.winBright, loss: Theme.lossBright, spacing: 4)
+                        .frame(height: 22)
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Last \(recent.count) games: \(recent.filter(\.win).count) wins")
             }
         }
-        // One of the few navy cards on the light app: the headline number.
+        // The one gradient card on the page: the headline number.
         .padding(Theme.cardPadding)
-        .background(Theme.navyGradient)
+        .background(Theme.accentGradient)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.goldOnDark.opacity(0.3), lineWidth: 1))
-        .shadow(color: Theme.navy.opacity(0.25), radius: 14, y: 6)
+        .shadow(color: Theme.accent.opacity(0.3), radius: 14, y: 6)
         .environment(\.colorScheme, .dark)
     }
 
@@ -251,9 +244,21 @@ private struct MetricTile: View {
     }
 
     /// The last 20 games, oldest to newest.
+    @ViewBuilder
     private var sparkline: some View {
         let points = Array(metric.series.suffix(20).enumerated())
-        return Chart {
+        if points.count < 2 {
+            Text("Trend line after 2 games")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+        } else {
+            sparklineChart(points)
+        }
+    }
+
+    private func sparklineChart(_ points: [(offset: Int, element: Double)]) -> some View {
+        Chart {
             ForEach(points, id: \.offset) { index, value in
                 AreaMark(x: .value("Game", index), y: .value(metric.title, value))
                     .foregroundStyle(LinearGradient(colors: [Theme.teal.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
@@ -349,5 +354,24 @@ private struct HighlightsCard: View {
         .padding(.vertical, 10)
         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Results as a row of bars, oldest on the left.
+struct ResultStrip: View {
+    let matches: [Match]
+    var win = Theme.win
+    var loss = Theme.loss
+    var spacing: CGFloat = 2
+    var maxBarWidth: CGFloat = .infinity
+
+    var body: some View {
+        HStack(spacing: spacing) {
+            ForEach(Array(matches.enumerated()), id: \.offset) { _, match in
+                RoundedRectangle(cornerRadius: spacing, style: .continuous)
+                    .fill(match.win ? win : loss)
+                    .frame(maxWidth: maxBarWidth)
+            }
+        }
     }
 }

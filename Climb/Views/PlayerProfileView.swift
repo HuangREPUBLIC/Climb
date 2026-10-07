@@ -38,8 +38,8 @@ struct PlayerProfileView: View {
         return savedPlayers.first { $0.key == key }
     }
     private var isYou: Bool {
-        accounts.first.map { SavedPlayer.key(gameName: $0.riotGameName, tagLine: $0.riotTagline) }
-            == SavedPlayer.key(gameName: riotIdGameName, tagLine: riotIdTagline)
+        accounts.first.map { LinkedAccount.identity(gameName: $0.riotGameName, tagLine: $0.riotTagline) }
+            == LinkedAccount.identity(gameName: riotIdGameName, tagLine: riotIdTagline)
     }
 
 
@@ -49,7 +49,8 @@ struct PlayerProfileView: View {
                 VStack(spacing: 20) {
                     header
                     if !matches.isEmpty {
-                        if !isYou, accounts.first != nil { compareCard }
+                        ProfileStatsSection(matches: matches)
+                        if !isYou { compareCard }
                         matchesCard
                     } else if isLoading {
                         ProgressView().padding(.top, 40)
@@ -125,8 +126,6 @@ struct PlayerProfileView: View {
             if let profile {
                 RankChip(tier: profile.rankTier, division: profile.rankDivision, leaguePoints: profile.leaguePoints)
             }
-        } footer: {
-            if !matches.isEmpty { StatSummaryCard(matches: matches, embedded: true) }
         }
     }
 
@@ -234,6 +233,10 @@ struct PlayerProfileView: View {
                 }
                 .buttonStyle(PressableButtonStyle())
                 .disabled(isLoadingMore)
+                // Scrolling to the end loads the next page too.
+                .onScrollVisibilityChange(threshold: 0.5) { visible in
+                    if visible, !isLoadingMore { Task { await loadPage(reset: false) } }
+                }
             }
         }
     }

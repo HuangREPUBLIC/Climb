@@ -1,30 +1,18 @@
 import SwiftUI
 
+/// A ranked tier's emblem. The ten emblems ship in the asset catalog as
+/// `emblem-<tier>`, cropped to the badge: CommunityDragon, which used to
+/// serve them, often takes ~20s or times out (Cloudflare 522).
 struct RankIconView: View {
     let tier: String
     var size: CGFloat = 48
 
-    /// CommunityDragon's emblem PNGs pad the actual badge art inside a much
-    /// larger transparent canvas (verified: the visible badge is only
-    /// ~17-35% of the image's height depending on tier). `scaledToFit` faithfully
-    /// preserves that dead space, so the badge reads as tiny no matter how big
-    /// the frame is. Filling + zooming crops past the padding so the badge
-    /// itself — not the invisible canvas around it — fills the frame.
-    private let zoomFactor: CGFloat = 3.0
-
     var body: some View {
         Group {
-            if let url = RankEmblemService.emblemURL(for: tier) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .scaleEffect(zoomFactor)
-                    } else {
-                        placeholder
-                    }
-                }
+            if let image = UIImage(named: "emblem-\(tier.lowercased())") {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
             } else {
                 placeholder
             }

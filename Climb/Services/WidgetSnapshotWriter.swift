@@ -25,4 +25,10 @@ enum WidgetSnapshotWriter {
         defaults.set(data, forKey: key)
         WidgetCenter.shared.reloadAllTimelines()
     }
+
+    /// After switching accounts, so the widget doesn't show the old one's game.
+    static func clear() {
+        UserDefaults(suiteName: suiteName)?.removeObject(forKey: key)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
 }

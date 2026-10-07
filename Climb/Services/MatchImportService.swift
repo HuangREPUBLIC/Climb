@@ -212,6 +212,8 @@ enum MatchImportService {
         let summoner = try? await client.fetchSummoner(puuid: puuid, platform: platform)
         let leagueEntries = try? await client.fetchLeagueEntries(puuid: puuid, platform: platform)
 
+        try dropOtherAccountsHistory(gameName: gameName, tagLine: tagLine, puuid: puuid, context: context)
+
         let account: LinkedAccount
         if let existing = try context.fetch(FetchDescriptor<LinkedAccount>()).first {
             existing.riotGameName = gameName
@@ -284,6 +286,54 @@ enum MatchImportService {
             championName: newest?.leagueStats?.champion
         )
         updateWidgetSnapshot(context: context)
+    }
+
+    /// Linking a different account starts clean: the old account's games
+    /// (with their AI reviews and coach chats, which cascade), its rank and
+    /// the widget's last match all go. Runs before the import, so a failed
+    /// sync can't leave the old games under the new name.
+    ///
+    /// A game's owner is its linked player's puuid, but puuids change with the
+    /// API key (see `apiKeyFingerprintDefaultsKey`), so they are only compared
+    /// on games imported under the current key. That per-game check also
+    /// cleans a store that already mixes accounts. A different Riot ID is a
+    /// switch unless one of those games belongs to the new puuid — then it's
+    /// the same player, renamed.
+    ///
+    /// ponytail: a rename right after a key change (no comparable games yet)
+    /// still reads as a switch; store the account's puuid per key if that
+    /// starts to matter.
+    private static func dropOtherAccountsHistory(gameName: String, tagLine: String, puuid: String, context: ModelContext) throws {
+        let existing = try context.fetch(FetchDescriptor<LinkedAccount>()).first
+        let own = try context.fetch(FetchDescriptor<Match>(predicate: #Predicate { $0.isOwnHistory }))
+        let current = currentDataVersion
+        let comparable = apiKeyChangedSinceLastImport ? [] : own.filter { $0.importVersion == current }
+        let nameChanged = existing.map {
+            LinkedAccount.identity(gameName: $0.riotGameName, tagLine: $0.riotTagline)
+                != LinkedAccount.identity(gameName: gameName, tagLine: tagLine)
+        } ?? false
+        let switched = nameChanged && !comparable.contains { $0.focusParticipant?.puuid == puuid }
+
+        let foreign = switched ? own : comparable.filter { match in
+            match.focusParticipant.map { $0.puuid != puuid } ?? false
+        }
+        for match in foreign { context.delete(match) }
+
+        if switched, let existing {
+            // Reset in place rather than deleted: an empty account list, even
+            // for a moment, would swap ContentView to onboarding mid-sync.
+            existing.profileIconID = nil
+            existing.summonerLevel = nil
+            existing.lastLeagueSyncDate = nil
+            existing.lastTFTSyncDate = nil
+            existing.lastRiotActivityDate = nil
+            applyRank(nil, to: existing)
+        }
+        guard switched || !foreign.isEmpty else { return }
+        WidgetSnapshotWriter.clear()
+        UserDefaults.standard.removeObject(forKey: "trendDiagnosis")
+        UserDefaults.standard.removeObject(forKey: "trendDiagnosisKey")
+        try context.save()
     }
 
     private static func applyRank(_ entry: RiotLeagueEntry?, to account: LinkedAccount) {
