@@ -25,8 +25,8 @@ struct MatchRowView: View {
                 OutcomePill(text: match.outcomeText, tint: resultColor)
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 6) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(match.leagueStats?.champion ?? "Teamfight Tactics")
                             .font(.headline)
@@ -34,12 +34,24 @@ struct MatchRowView: View {
                         queueLine
                     }
                     Spacer(minLength: 4)
+                    if let stats = match.leagueStats { KDABadge(kda: stats.kda) }
                     RatingBadge(match: match)
                 }
 
                 if let stats = match.leagueStats {
-                    KDAColumns(stats: stats)
-                    itemRow
+                    // K/D/A and the build on one row, so a card is two lines
+                    // of text rather than three; stacked when they don't fit.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .center, spacing: 4) {
+                            KDAColumns(stats: stats, showsRatio: false, spacing: 10)
+                            Spacer(minLength: 4)
+                            itemRow
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            KDAColumns(stats: stats, showsRatio: false, spacing: 10)
+                            itemRow
+                        }
+                    }
                 } else if let tft = match.tftStats {
                     Text("Level \(tft.level) · \(tft.traits.prefix(3).joined(separator: " · "))")
                         .font(.subheadline)
@@ -48,14 +60,13 @@ struct MatchRowView: View {
                 }
             }
         }
-        .padding(14)
+        .padding(12)
         .padding(.leading, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            ZStack(alignment: .leading) {
-                LinearGradient(colors: [resultColor.opacity(0.16), .clear], startPoint: .leading, endPoint: UnitPoint(x: 0.45, y: 0.5))
-                resultColor.frame(width: 4)
-            }
+        // Only the strip and the pill carry the result: a whole-card wash
+        // turned a losing streak into a screen of pink.
+        .background(alignment: .leading) {
+            resultColor.frame(width: 4)
         }
         .cardSurface(padding: 0)
         .accessibilityElement(children: .combine)
@@ -89,15 +100,24 @@ struct MatchRowView: View {
 
     private var queueLine: some View {
         let style = ChipStyle.of(match.queueType)
-        return HStack(spacing: 4) {
-            Image(systemName: style.icon)
-                .foregroundStyle(style.tint)
-            Text("\(match.queueType) · \(match.timestamp.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)))")
-                .foregroundStyle(.secondary)
+        // The list's day headers carry the date; the time places it in the
+        // day, and is the part dropped when KDA, MVP and rating crowd the row.
+        let time = match.timestamp.formatted(date: .omitted, time: .shortened)
+        return ViewThatFits(in: .horizontal) {
+            queueLabel("\(match.queueType) · \(time)", style: style)
+            queueLabel(match.queueType, style: style)
         }
         .font(.caption)
+    }
+
+    private func queueLabel(_ text: String, style: (tint: Color, icon: String)) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: style.icon)
+                .foregroundStyle(style.tint)
+            Text(text)
+                .foregroundStyle(.secondary)
+        }
         .lineLimit(1)
-        .minimumScaleFactor(0.8)
     }
 
     private var itemRow: some View {
@@ -115,14 +135,23 @@ struct MatchRowView: View {
                         .frame(width: 44, height: 44)
                 }
             }
-            ForEach(Array(shown.enumerated()), id: \.offset) { _, item in
+            ForEach(Array(shown.enumerated()), id: \.offset) { index, item in
                 ItemIconView(itemID: item, size: itemSize)
-            }
-            if build.count > 3 {
-                Text("+\(build.count - 3)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 2)
+                    // The rest of the build as a corner badge, not a column:
+                    // the row has to fit beside K/D/A.
+                    .overlay(alignment: .topTrailing) {
+                        if index == shown.count - 1, build.count > 3 {
+                            Text("+\(build.count - 3)")
+                                .scaledFont(9, weight: .bold, monospacedDigit: true)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.secondary, in: Capsule())
+                                // Anchored to the 44pt hit frame; pulled in to the icon's corner.
+                                .offset(x: -max(44 - itemSize, 0) / 2 + 4, y: max(44 - itemSize, 0) / 2 - 4)
+                                .allowsHitTesting(false)
+                        }
+                    }
             }
         }
         .padding(.leading, min(itemSize - 44, 0) / 2)
@@ -236,21 +265,51 @@ struct RatingBadge: View {
     }
 }
 
+/// The KDA ratio in the rating badge's shape, so the card's two verdicts
+/// sit side by side and read the same way.
+struct KDABadge: View {
+    let kda: Double
+
+    var body: some View {
+        let tint = Theme.kdaColor(kda)
+        VStack(spacing: 0) {
+            Text(String(format: "%.2f", kda))
+                .font(.subheadline.weight(.heavy).monospacedDigit())
+            Text("KDA")
+                .scaledFont(7, weight: .bold)
+                .tracking(0.4)
+                .opacity(0.8)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("KDA \(String(format: "%.2f", kda))")
+    }
+}
+
 /// Kills, deaths and assists as labelled columns, then the KDA ratio in its
 /// traffic-light colour — "5 / 8 / 7" means nothing to someone who doesn't play.
 struct KDAColumns: View {
     let stats: LeagueStats
+    /// The match card shows the ratio as a badge beside the rating instead.
+    var showsRatio = true
+    var spacing: CGFloat = 14
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
+        HStack(alignment: .firstTextBaseline, spacing: spacing) {
             column("\(stats.kills)", "KILLS", .primary)
             column("\(stats.deaths)", "DEATHS", Theme.loss)
             column("\(stats.assists)", "ASSISTS", .primary)
-            Spacer(minLength: 4)
-            column(String(format: "%.2f", stats.kda), "KDA", Theme.kdaColor(stats.kda), alignment: .trailing)
+            if showsRatio {
+                Spacer(minLength: 4)
+                column(String(format: "%.2f", stats.kda), "KDA", Theme.kdaColor(stats.kda), alignment: .trailing)
+            }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(stats.kills) kills, \(stats.deaths) deaths, \(stats.assists) assists, KDA \(String(format: "%.2f", stats.kda))")
+        .accessibilityLabel("\(stats.kills) kills, \(stats.deaths) deaths, \(stats.assists) assists" + (showsRatio ? ", KDA \(String(format: "%.2f", stats.kda))" : ""))
     }
 
     private func column(_ value: String, _ label: String, _ tint: Color, alignment: HorizontalAlignment = .leading) -> some View {
@@ -280,20 +339,77 @@ struct MatchCardList: View {
     var editTags: ((Match) -> Void)?
 
     var body: some View {
-        LazyVStack(spacing: 12) {
-            ForEach(matches) { match in
-                Button { open(match) } label: { MatchRowView(match: match) }
-                    .buttonStyle(PressableButtonStyle())
-                    .contextMenu {
-                        Button("View details", systemImage: "arrow.up.forward.square") { open(match) }
-                        if let editTags {
-                            Button("Add tag", systemImage: "tag") { editTags(match) }
-                        }
-                    } preview: {
-                        MatchPreviewView(match: match)
-                    }
+        LazyVStack(alignment: .leading, spacing: 12) {
+            // Day headers: "2 wk. ago" on every card said nothing about
+            // which games were one evening's session.
+            ForEach(Self.days(of: matches)) { day in
+                Section {
+                    ForEach(day.matches) { card($0) }
+                } header: {
+                    dayHeader(day)
+                }
             }
         }
+    }
+
+    private func dayHeader(_ day: DayGroup) -> some View {
+        let wins = day.matches.filter(\.win).count
+        return HStack(spacing: 6) {
+            Text(Self.title(for: day.date))
+                .font(.subheadline.weight(.semibold))
+            Text("\(wins)W \(day.matches.count - wins)L")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    struct DayGroup: Identifiable {
+        let date: Date
+        var matches: [Match]
+        var id: Date { date }
+    }
+
+    /// Games by calendar day, days in first-seen order. Bucketed rather than
+    /// split on runs: a searched player's list follows Riot's id order, and
+    /// two runs of one day would give the ForEach a duplicate id.
+    static func days(of matches: [Match]) -> [DayGroup] {
+        var groups: [DayGroup] = []
+        var index: [Date: Int] = [:]
+        for match in matches {
+            let date = Calendar.current.startOfDay(for: match.timestamp)
+            if let i = index[date] {
+                groups[i].matches.append(match)
+            } else {
+                index[date] = groups.count
+                groups.append(DayGroup(date: date, matches: [match]))
+            }
+        }
+        return groups
+    }
+
+    static func title(for date: Date) -> String {
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
+        let format = Date.FormatStyle.dateTime.weekday(.wide).month(.abbreviated).day()
+        // Loading older games can reach last year, where "Tuesday, Oct 14" is ambiguous.
+        return date.formatted(Calendar.current.isDate(date, equalTo: .now, toGranularity: .year) ? format : format.year())
+    }
+
+    private func card(_ match: Match) -> some View {
+        Button { open(match) } label: { MatchRowView(match: match) }
+            .buttonStyle(PressableButtonStyle())
+            .contextMenu {
+                Button("View details", systemImage: "arrow.up.forward.square") { open(match) }
+                if let editTags {
+                    Button("Add tag", systemImage: "tag") { editTags(match) }
+                }
+            } preview: {
+                MatchPreviewView(match: match)
+            }
     }
 }
 

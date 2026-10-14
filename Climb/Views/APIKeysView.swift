@@ -17,8 +17,12 @@ struct APIKeysView: View {
         Form {
             if let reason {
                 Section {
-                    Label(reason, systemImage: "key.slash")
-                        .foregroundStyle(.orange)
+                    // Orange text on white was hard to read; only the icon is orange.
+                    Label {
+                        Text(reason)
+                    } icon: {
+                        Image(systemName: "key.slash").foregroundStyle(Theme.orange)
+                    }
                 }
             }
 

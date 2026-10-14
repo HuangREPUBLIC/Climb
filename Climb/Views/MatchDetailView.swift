@@ -280,10 +280,10 @@ struct MatchDetailView: View {
                 let minutes = match.minutes
                 let rates = Group {
                     rateStat("Gold/min", String(format: "%.0f", Double(stats.goldEarned) / minutes))
-                    rateStat("Dmg/min", String(format: "%.0f", Double(stats.damageDealtToChampions) / minutes))
+                    rateStat("Damage/min", String(format: "%.0f", Double(stats.damageDealtToChampions) / minutes))
                     rateStat("Minions/min", String(format: "%.1f", Double(stats.creepScore) / minutes))
-                    rateStat("Solo", "\(stats.soloKills)")
-                    rateStat("Spree", "\(stats.largestKillingSpree)")
+                    rateStat("1v1 kills", "\(stats.soloKills)")
+                    rateStat("Kill streak", "\(stats.largestKillingSpree)")
                 }
                 // Five across, wrapping to a grid only when they no longer fit.
                 if dynamicTypeSize.isAccessibilitySize {
@@ -497,7 +497,7 @@ struct MatchDetailView: View {
             VStack(spacing: -1) {
                 Text("\(percent)%")
                     .scaledFont(15, relativeTo: .subheadline, weight: .bold, monospacedDigit: true)
-                Text("KP")
+                Text("kill share")
                     .scaledFont(8)
                     .foregroundStyle(.secondary)
             }

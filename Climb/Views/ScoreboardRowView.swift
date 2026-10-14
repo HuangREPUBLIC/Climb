@@ -235,7 +235,7 @@ struct ScoreboardRowView: View {
             : Array(repeating: GridItem(.flexible()), count: 4)
 
         return LazyVGrid(columns: columns, spacing: 10) {
-            stat("\(killParticipation)%", "KP")
+            stat("\(killParticipation)%", "Kill share")
             stat(participant.damageDealtToChampions.formatted(), "Damage")
             stat(participant.damageTaken.formatted(), "Taken")
             stat(participant.goldEarned.formatted(), "Gold")

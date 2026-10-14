@@ -102,7 +102,13 @@ struct TeamComparisonView: View {
         let columns = dynamicTypeSize.isAccessibilitySize
             ? [GridItem(.adaptive(minimum: objectiveTileMinWidth), spacing: 14)]
             : [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
-        return Group {
+        return VStack(spacing: 12) {
+            // "1 / 0" says nothing until you know which side is which.
+            HStack(spacing: 14) {
+                LegendDot(color: .blue, label: "Your team")
+                LegendDot(color: .red, label: "Enemy team")
+            }
+            .frame(maxWidth: .infinity)
             LazyVGrid(columns: columns, spacing: 14) {
                 objectiveTile(url: ObjectiveIconService.baronURL, label: "Baron", ally: ally?.baronKills ?? 0, enemy: enemy?.baronKills ?? 0)
                 objectiveTile(url: ObjectiveIconService.url(named: "dragon"), label: "Dragon", ally: ally?.dragonKills ?? 0, enemy: enemy?.dragonKills ?? 0)

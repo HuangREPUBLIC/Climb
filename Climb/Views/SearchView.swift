@@ -60,6 +60,7 @@ struct SearchView: View {
         .background(Theme.background)
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Search")
+        .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $found) { player in
             PlayerProfileView(
                 puuid: player.puuid,

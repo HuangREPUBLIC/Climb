@@ -6,6 +6,7 @@ struct ChampionsView: View {
     @AppStorage("championsPosition") private var position: OPGGPosition = .top
     @State private var meta: [OPGGPosition: [MetaChampion]] = [:]
     @State private var errorMessage: String?
+    @State private var query = ""
 
     @ScaledMetric(relativeTo: .subheadline) private var portraitSize: CGFloat = 38
     @ScaledMetric(relativeTo: .caption) private var rateColumnWidth: CGFloat = 40
@@ -19,7 +20,13 @@ struct ChampionsView: View {
                 .pickerStyle(.segmented)
 
                 if let champions = meta[position] {
-                    tierList(champions)
+                    let term = query.trimmingCharacters(in: .whitespaces)
+                    let shown = term.isEmpty ? champions : champions.filter { $0.champion.localizedStandardContains(term) }
+                    if shown.isEmpty {
+                        ContentUnavailableView.search(text: query)
+                    } else {
+                        tierList(shown)
+                    }
                 } else if let errorMessage {
                     ContentUnavailableView {
                         Label("Couldn't load op.gg", systemImage: "wifi.exclamationmark")
@@ -37,9 +44,12 @@ struct ChampionsView: View {
         }
         .background(Theme.background)
         .navigationTitle("Champions")
+        .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: ChampionRoute.self) { route in
             ChampionDetailView(champion: route.champion, position: route.position)
         }
+        // Fifty-odd champions a lane: scrolling for one was the only way.
+        .searchable(text: $query, prompt: "Find a champion")
         .refreshable { await load() }
         .task(id: position) {
             if meta[position] == nil { await load() }
@@ -48,6 +58,13 @@ struct ChampionsView: View {
 
     private func tierList(_ champions: [MetaChampion]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            // The badges are op.gg's grades; the key sits where they're read,
+            // not in a footnote fifty rows down.
+            Text("Tier: OP is the strongest right now, then T1 (strong) down to T5 (weak).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4)
             HStack {
                 Text("Champion")
                 Spacer()

@@ -203,12 +203,11 @@ enum MatchImportService {
         gamesToSync: Set<Game>,
         context: ModelContext
     ) async throws {
-        // A prompt that couldn't show (another sheet was up) mustn't stay
-        // raised forever; the next 401 raises it again.
-        APIKeyPrompt.shared.riotKeyRejected = false
         let region = platform.region
         let client = RiotAPIClient.shared
         let puuid = try await client.resolvePUUID(gameName: gameName, tagLine: tagLine, region: region)
+        // Riot accepted the key, so the expiry banner can go.
+        APIKeyPrompt.shared.riotKeyRejected = false
         let summoner = try? await client.fetchSummoner(puuid: puuid, platform: platform)
         let leagueEntries = try? await client.fetchLeagueEntries(puuid: puuid, platform: platform)
 

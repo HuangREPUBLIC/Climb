@@ -102,9 +102,16 @@ struct OnboardingView: View {
                 hero(intro.icon)
                     .padding(.top, 24)
                 VStack(spacing: 8) {
-                    Text(intro.title)
-                        .font(.largeTitle.bold())
-                        .multilineTextAlignment(.center)
+                    // Two lines held on every page, so the card doesn't jump
+                    // when one title wraps and the next doesn't. The spare
+                    // line goes above a short title, not between it and its
+                    // subtitle.
+                    ZStack(alignment: .bottom) {
+                        Text(" \n ").hidden()
+                        Text(intro.title)
+                            .multilineTextAlignment(.center)
+                    }
+                    .font(.largeTitle.bold())
                     Text(intro.message)
                         .font(.body)
                         .foregroundStyle(.secondary)
@@ -132,6 +139,8 @@ struct OnboardingView: View {
             .readableContentWidth(520)
         }
         .scrollBounceBehavior(.basedOnSize)
+        // Centred when it fits; pinned to the top it left half the screen empty.
+        .defaultScrollAnchor(.center, for: .alignment)
     }
 
     private var loginForm: some View {
@@ -177,6 +186,7 @@ struct OnboardingView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .scrollBounceBehavior(.basedOnSize)
+        .defaultScrollAnchor(.center, for: .alignment)
     }
 
     private func hero(_ icon: String) -> some View {

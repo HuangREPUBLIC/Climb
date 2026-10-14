@@ -33,7 +33,22 @@ struct ChampionDetailView: View {
                 } else if let errorMessage {
                     ErrorCard(message: errorMessage)
                 } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                    // op.gg takes several seconds; cards shaped like the page
+                    // read as "loading", where a lone spinner read as empty.
+                    VStack(spacing: Theme.sectionSpacing) {
+                        ForEach([90, 230, 150], id: \.self) { height in
+                            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                                .fill(Theme.surfaceRaised)
+                                .frame(height: CGFloat(height))
+                        }
+                        Text("Loading this lane's build from op.gg…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .phaseAnimator([0.55, 1]) { content, opacity in
+                        content.opacity(opacity)
+                    } animation: { _ in .easeInOut(duration: 0.8) }
+                    .accessibilityElement(children: .combine)
                 }
             }
             .padding()

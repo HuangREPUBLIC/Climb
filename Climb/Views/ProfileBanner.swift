@@ -25,12 +25,12 @@ struct ProfileBanner<Content: View>: View {
     }
 
     var body: some View {
-        // Portrait above the name rather than beside it, so the name and
-        // rank get the card's width up to the art.
+        // Portrait beside the name: stacked above it, the banner alone took
+        // half the first screen and the first match started below the fold.
         HStack(alignment: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                avatar
-                    .padding(.bottom, 8)
+            avatar
+                .padding(.trailing, 14)
+            VStack(alignment: .leading, spacing: 6) {
                 content()
                 if let mainChampion {
                     Text("MAIN · \(mainChampion.name) · \(mainChampion.games) games")
@@ -42,10 +42,10 @@ struct ProfileBanner<Content: View>: View {
                 }
             }
             // Text stops where the art is still visible.
-            Spacer(minLength: artWidth * 0.75)
+            Spacer(minLength: artWidth * 0.5)
         }
         .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(alignment: .trailing) { championArt }
         .background(Theme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -309,6 +309,52 @@ struct ProfileStatsSection: View {
     }
 }
 
+/// Your own Matches tab's one-line summary. The full breakdown is the Stats
+/// tab's job; repeating it here pushed the first match below the fold.
+/// `matches` is newest first.
+struct ProfileSummaryStrip: View {
+    let matches: [Match]
+
+    var body: some View {
+        let wins = matches.filter(\.win).count
+        let percent = Int((Double(wins) / Double(max(matches.count, 1)) * 100).rounded())
+        let kda = FriendComparisonService.aggregate(matches).kda
+        let recent = Array(matches.prefix(10).reversed())
+        HStack(spacing: 16) {
+            // Coloured on the printed figure, so "50%" is never red.
+            figure("\(percent)%", "Win rate · \(wins)W \(matches.count - wins)L",
+                   tint: percent >= 50 ? Theme.win : Theme.loss)
+            if matches.contains(where: { $0.leagueStats != nil }) {
+                figure(String(format: "%.2f", kda), "KDA", tint: Theme.kdaColor(kda))
+            }
+            VStack(alignment: .trailing, spacing: 4) {
+                ResultStrip(matches: recent, maxBarWidth: 10)
+                    .frame(height: 18)
+                Text("Last \(recent.count) · newest right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .cardSurface(padding: 12)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func figure(_ value: String, _ caption: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(value)
+                .font(.title3.weight(.bold).monospacedDigit())
+                .foregroundStyle(tint)
+            Text(caption)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .fixedSize()
+    }
+}
+
 /// Win rate as a number and as a bar split between wins and losses.
 private struct WinLossCard: View {
     let matches: [Match]
@@ -325,7 +371,7 @@ private struct WinLossCard: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("\(percent)%")
                         .font(.largeTitle.weight(.heavy).monospacedDigit())
-                        .foregroundStyle(rate >= 0.5 ? Theme.win : Theme.loss)
+                        .foregroundStyle(percent >= 50 ? Theme.win : Theme.loss)
                     Text(isTFT ? "Top 4 rate" : "Win rate")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)

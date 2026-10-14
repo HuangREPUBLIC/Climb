@@ -21,6 +21,7 @@ struct ProfileView: View {
     @State private var taggingMatch: Match?
 
     @Environment(\.modelContext) private var modelContext
+    @ObservedObject private var keyPrompt = APIKeyPrompt.shared
 
     private var account: LinkedAccount? { accounts.first }
     /// Everything on this screen follows the game switcher.
@@ -48,10 +49,11 @@ struct ProfileView: View {
             VStack(spacing: 16) {
                 VStack(spacing: 16) {
                     header
+                    expiredKeyNotice
                     unpublishedMatchNotice
                     // The numbers follow the filters, so picking "Ranked
                     // Solo/Duo" answers "how am I doing in ranked".
-                    if !filtered.isEmpty { ProfileStatsSection(matches: filtered) }
+                    if !filtered.isEmpty { ProfileSummaryStrip(matches: filtered) }
                 }
                 .padding(.horizontal)
 
@@ -103,8 +105,10 @@ struct ProfileView: View {
             MatchDetailView(match: match)
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game)))
+            if GameFilterPicker.isNeeded(selection: selectedGame, availableGames: Set(allMatches.map(\.game))) {
+                ToolbarItem(placement: .topBarLeading) {
+                    GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game)))
+                }
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -159,6 +163,43 @@ struct ProfileView: View {
         .padding(.bottom, 4)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+    }
+
+    /// The key sheet opens by itself only once; after Cancel this says why
+    /// nothing new is syncing, while the saved games stay browsable.
+    @ViewBuilder
+    private var expiredKeyNotice: some View {
+        if keyPrompt.riotKeyRejected {
+            Button {
+                // A prompt raised while another sheet was up never showed
+                // but left the flag set; setting true again would do nothing.
+                keyPrompt.isPresented = false
+                Task { @MainActor in keyPrompt.isPresented = true }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "key.slash")
+                        .foregroundStyle(Theme.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Riot API key expired")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Showing saved games. Paste today's key to sync new ones.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 4)
+                    Text("Update")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+                .foregroundStyle(.primary)
+                .padding(Theme.cardPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            }
+            .buttonStyle(PressableButtonStyle())
+        }
     }
 
     /// Riot's match API can run behind the account itself — event queues in

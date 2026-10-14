@@ -42,12 +42,13 @@ struct RadarChartView: View {
 
     private var axisCount: Int { max(axes.count, 3) }
 
+    /// Not clamped: labels sit past the outer ring (1.28). Clamping here used
+    /// to pin every label onto its vertex, under the polygon's edges.
     private func point(forFraction fraction: Double, index: Int, center: CGPoint, radius: CGFloat) -> CGPoint {
         let angle = angle(for: index)
-        let clamped = max(0, min(fraction, 1))
         return CGPoint(
-            x: center.x + radius * CGFloat(clamped) * cos(angle),
-            y: center.y + radius * CGFloat(clamped) * sin(angle)
+            x: center.x + radius * CGFloat(fraction) * cos(angle),
+            y: center.y + radius * CGFloat(fraction) * sin(angle)
         )
     }
 
@@ -58,7 +59,7 @@ struct RadarChartView: View {
 
     private func normalizedFraction(_ value: Double, against other: Double) -> Double {
         let maxValue = max(value, other, 0.0001)
-        return value / maxValue
+        return max(0, min(value / maxValue, 1))
     }
 
     private func polygon(center: CGPoint, radius: CGFloat, keyPath: KeyPath<Axis, Double>) -> Path {

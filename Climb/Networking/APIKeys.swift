@@ -74,5 +74,13 @@ nonisolated enum APIKeys {
 @MainActor
 final class APIKeyPrompt: ObservableObject {
     static let shared = APIKeyPrompt()
-    @Published var riotKeyRejected = false
+    /// Riot turned the key down. Stays up until a sync or a saved key clears
+    /// it, so the Matches banner can keep saying so.
+    @Published var riotKeyRejected = false {
+        didSet { if riotKeyRejected && !oldValue { isPresented = true } }
+    }
+    /// The key sheet opens by itself once per rejection. Every request after
+    /// that also gets a 401, and re-opening on each one buried the cached
+    /// games under the sheet; after Cancel the banner reopens it instead.
+    @Published var isPresented = false
 }

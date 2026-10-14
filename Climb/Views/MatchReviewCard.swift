@@ -13,6 +13,9 @@ struct MatchReviewCard: View {
     @Environment(\.modelContext) private var modelContext
     @State private var isGenerating = false
     @State private var errorMessage: String?
+    /// Opened, the review ran over two screens and pushed the scoreboard
+    /// tabs out of reach; closed it is the verdict and a way in.
+    @State private var isExpanded = false
 
     var body: some View {
         let reply = match.reviewText.map(CoachReply.init)
@@ -28,12 +31,29 @@ struct MatchReviewCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            ReviewCharts(match: match)
-
             if let reply {
-                // The verdict is already the card's title.
-                CoachReplyView(reply: reply.withoutHeadline)
+                // A reply with no headline has nothing to collapse to.
+                if isExpanded || reply.headline == nil {
+                    ReviewCharts(match: match)
+                    // The verdict is already the card's title.
+                    CoachReplyView(reply: reply.withoutHeadline)
+                }
+                if reply.headline != nil {
+                    Button {
+                        withAnimation(.snappy) { isExpanded.toggle() }
+                    } label: {
+                        Label(isExpanded ? "Show less" : "Show full review", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                }
             } else if let errorMessage {
+                // The charts are drawn from the match, not the model, so a
+                // missing key or failed request doesn't take them away.
+                ReviewCharts(match: match)
                 VStack(alignment: .leading, spacing: 8) {
                     Text(errorMessage)
                         .font(.subheadline)
@@ -42,6 +62,7 @@ struct MatchReviewCard: View {
                         .font(.subheadline.weight(.semibold))
                 }
             } else {
+                ReviewCharts(match: match)
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Reviewing this game…")
@@ -164,7 +185,8 @@ private struct ReviewCharts: View {
 
 /// Two bars on one scale — yours and what it's measured against — so who
 /// is ahead is a glance rather than a subtraction. Yours is green when
-/// clearly better, red when clearly worse, the accent when level.
+/// clearly better, red when clearly worse, amber when level — the same
+/// traffic light as KDA and rating; theirs is always grey.
 struct ComparisonBarRow: View {
     let label: String
     let mine: Double
@@ -195,7 +217,7 @@ struct ComparisonBarRow: View {
 
     /// Within 5% reads as level.
     private var verdictTint: Color {
-        guard abs(mine - theirs) / peak >= 0.05 else { return Theme.accent }
+        guard abs(mine - theirs) / peak >= 0.05 else { return Theme.fair }
         return (mine > theirs) != lowerIsBetter ? Theme.good : Theme.poor
     }
 

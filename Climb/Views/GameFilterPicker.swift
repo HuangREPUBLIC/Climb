@@ -11,6 +11,12 @@ struct GameFilterPicker: View {
     /// obvious they exist but have nothing in them yet.
     var availableGames: Set<Game> = Set(Game.allCases)
 
+    /// A switcher whose only other choice is empty is noise. It still shows
+    /// while an empty game is selected, so there is a way back.
+    static func isNeeded(selection: Game, availableGames: Set<Game>) -> Bool {
+        availableGames.count > 1 || !availableGames.contains(selection)
+    }
+
     var body: some View {
         Menu {
             ForEach(Game.allCases) { game in

@@ -261,10 +261,10 @@ private struct MetricTile: View {
         Chart {
             ForEach(points, id: \.offset) { index, value in
                 AreaMark(x: .value("Game", index), y: .value(metric.title, value))
-                    .foregroundStyle(LinearGradient(colors: [Theme.teal.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
+                    .foregroundStyle(LinearGradient(colors: [Theme.chart.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
                     .interpolationMethod(.catmullRom)
                 LineMark(x: .value("Game", index), y: .value(metric.title, value))
-                    .foregroundStyle(Theme.teal)
+                    .foregroundStyle(Theme.chart)
                     .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
                     .interpolationMethod(.catmullRom)
             }
@@ -314,26 +314,60 @@ private struct HighlightsCard: View {
         let lines = rows.compactMap(\.match.leagueStats)
         let firstBlood = lines.isEmpty ? 0 : Double(lines.filter(\.firstBloodKill).count) / Double(lines.count) * 100
 
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Highlights").font(.headline)
-            Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-                GridRow {
-                    counter("\(mvp)", "MVP", "crown.fill", MatchAward.mvp.tint)
-                    counter("\(svp)", "SVP", "medal.fill", MatchAward.svp.tint)
-                    counter("\(Int(firstBlood.rounded()))%", "First blood", "drop.fill", Theme.poor)
+        // Only what happened: a row of 0 triple / quadra / penta kills read
+        // as broken, and the last round already dropped zero stats elsewhere.
+        let firstBloodPercent = Int(firstBlood.rounded())
+        let counters: [Counter] = [
+            Counter(count: mvp, value: "\(mvp)", label: "MVP", icon: "crown.fill", tint: MatchAward.mvp.tint),
+            Counter(count: svp, value: "\(svp)", label: "SVP", icon: "medal.fill", tint: MatchAward.svp.tint),
+            Counter(count: firstBloodPercent, value: "\(firstBloodPercent)%", label: "First blood", icon: "drop.fill", tint: Theme.poor),
+            Counter(count: lines.map(\.tripleKills).reduce(0, +), label: "Triple kills", icon: "flame", tint: Theme.fair),
+            Counter(count: lines.map(\.quadraKills).reduce(0, +), label: "Quadra kills", icon: "flame.fill", tint: Theme.orange),
+            Counter(count: lines.map(\.pentaKills).reduce(0, +), label: "Pentakills", icon: "flame.circle.fill", tint: Theme.poor)
+        ].filter { $0.count > 0 }
+
+        if !counters.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Highlights").font(.headline)
+                Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+                    ForEach(Array(stride(from: 0, to: counters.count, by: 3)), id: \.self) { start in
+                        GridRow {
+                            ForEach(counters[start..<min(start + 3, counters.count)], id: \.label) {
+                                counter($0.value, $0.label, $0.icon, $0.tint)
+                            }
+                        }
+                    }
                 }
-                GridRow {
-                    counter("\(lines.map(\.tripleKills).reduce(0, +))", "Triple kills", "flame", Theme.fair)
-                    counter("\(lines.map(\.quadraKills).reduce(0, +))", "Quadra kills", "flame.fill", Theme.orange)
-                    counter("\(lines.map(\.pentaKills).reduce(0, +))", "Pentakills", "flame.circle.fill", Theme.poor)
+                let shown = Set(counters.map(\.label))
+                let notes = [("MVP", "MVP: best rating on the winning team."),
+                             ("SVP", "SVP: best on the losing team."),
+                             ("First blood", "First blood: the game's first kill.")]
+                    .filter { shown.contains($0.0) }.map(\.1)
+                if !notes.isEmpty {
+                    Text(notes.joined(separator: " "))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Text("MVP: best rating on the winning team. SVP: best on the losing team. First blood: the game's first kill.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            .cardSurface()
         }
-        .cardSurface()
+    }
+
+    private struct Counter {
+        let count: Int
+        var value: String
+        let label: String
+        let icon: String
+        let tint: Color
+
+        init(count: Int, value: String? = nil, label: String, icon: String, tint: Color) {
+            self.count = count
+            self.value = value ?? "\(count)"
+            self.label = label
+            self.icon = icon
+            self.tint = tint
+        }
     }
 
     private func counter(_ value: String, _ label: String, _ icon: String, _ tint: Color) -> some View {

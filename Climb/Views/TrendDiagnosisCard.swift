@@ -12,13 +12,16 @@ struct TrendDiagnosisCard: View {
     @AppStorage("trendDiagnosis") private var storedText = ""
     @AppStorage("trendDiagnosisKey") private var storedKey = ""
     @State private var errorMessage: String?
+    /// Closed to its verdict, like the match review: open, it ran two
+    /// screens and the bars repeated the tiles under it.
+    @State private var isExpanded = false
 
     private var key: String { "\(newestID ?? "")|\(summary.games)" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Label("Last \(summary.games) games", systemImage: "sparkles")
+                Label("Last \(summary.games) games · all modes", systemImage: "sparkles")
                     .font(.headline)
                     .foregroundStyle(Theme.accentGradient)
                 Spacer()
@@ -27,25 +30,34 @@ struct TrendDiagnosisCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(summary.signals) { signal in
-                    ComparisonBarRow(
-                        label: signal.label,
-                        mine: signal.mine,
-                        theirs: signal.theirs,
-                        mineLabel: signal.mineLabel,
-                        theirsLabel: signal.theirsLabel,
-                        digits: signal.digits,
-                        mineTint: signal.isWeakness ? Theme.poor : Theme.accent
-                    )
-                }
-            }
-
-            Divider()
-
             if storedKey == key, !storedText.isEmpty {
-                CoachReplyView(reply: CoachReply(storedText))
+                let reply = CoachReply(storedText)
+                if let headline = reply.headline {
+                    CoachReplyView.styled(headline)
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                // A reply with no headline has nothing to collapse to.
+                if isExpanded || reply.headline == nil {
+                    signalBars
+                    Divider()
+                    CoachReplyView(reply: reply.withoutHeadline)
+                }
+                if reply.headline != nil {
+                    Button {
+                        withAnimation(.snappy) { isExpanded.toggle() }
+                    } label: {
+                        Label(isExpanded ? "Show less" : "Show the numbers behind it", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                }
             } else if let errorMessage {
+                signalBars
+                Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     Text(errorMessage)
                         .font(.subheadline)
@@ -54,6 +66,8 @@ struct TrendDiagnosisCard: View {
                         .font(.subheadline.weight(.semibold))
                 }
             } else {
+                signalBars
+                Divider()
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Looking for patterns…")
@@ -65,6 +79,23 @@ struct TrendDiagnosisCard: View {
         .cardSurface()
         .task(id: key) {
             if storedKey != key, summary.games >= TrendSummary.minimumGames { await generate(summary) }
+        }
+    }
+
+    /// The measured signals, green when fine and red when they're the problem.
+    private var signalBars: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(summary.signals) { signal in
+                ComparisonBarRow(
+                    label: signal.label,
+                    mine: signal.mine,
+                    theirs: signal.theirs,
+                    mineLabel: signal.mineLabel,
+                    theirsLabel: signal.theirsLabel,
+                    digits: signal.digits,
+                    mineTint: signal.isWeakness ? Theme.poor : Theme.good
+                )
+            }
         }
     }
 

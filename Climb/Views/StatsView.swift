@@ -97,6 +97,22 @@ struct StatsView: View {
                         )
                         .padding([.horizontal, .top])
                     }
+                    // Names what the filter and everything under it cover. The
+                    // AI card above always reads the last 20 of every mode, and
+                    // without this its 6.4 CS/min sat over a tile saying 6.3.
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Your numbers").font(.title3.bold())
+                        Spacer(minLength: 8)
+                        Text("\(matches.count) games · \(queueFilter ?? "all modes")")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
                     if queues.count > 1 {
                         TagFilterBar(tags: queues, selection: $queueFilter)
                     }
@@ -134,9 +150,12 @@ struct StatsView: View {
             }
         }
         .navigationTitle("Stats")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game)))
+            if GameFilterPicker.isNeeded(selection: selectedGame, availableGames: Set(allMatches.map(\.game))) {
+                ToolbarItem(placement: .topBarLeading) {
+                    GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game)))
+                }
             }
         }
         .onChange(of: selectedGame) { queueFilter = nil }
@@ -271,9 +290,10 @@ struct StatsView: View {
         let record = Text("\(entry.wins)W \(entry.games - entry.wins)L · \(String(format: "%.2f", entry.kda)) KDA")
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
+        // Under three games 100% or 0% is luck, so it isn't coloured as a verdict.
         let percentage = Text("\(Int(entry.winRate.rounded()))%")
             .font(.subheadline.weight(.semibold).monospacedDigit())
-            .foregroundStyle(entry.winRate >= 50 ? Theme.win : Theme.loss)
+            .foregroundStyle(entry.games < 3 ? Color.secondary : entry.winRate >= 50 ? Theme.win : Theme.loss)
 
         return HStack(spacing: 10) {
             ChampionIconView(championName: entry.champion, size: listPortraitSize)
@@ -306,9 +326,11 @@ struct StatsView: View {
             guard let stats = match.leagueStats else { return nil }
             return KDAGamePoint(index: index + 1, kda: stats.kda, win: match.win)
         }
-        let average = points.isEmpty ? 0 : points.map(\.kda).reduce(0, +) / Double(points.count)
+        // Totals over totals, like every other KDA here. The mean of per-game
+        // ratios read 1.8 over a tile saying 1.37: one deathless game inflates it.
+        let average = FriendComparisonService.aggregate(recent).kda
 
-        Text("last \(points.count) · avg \(String(format: "%.1f", average))")
+        Text("Last \(points.count) games · KDA \(String(format: "%.2f", average))")
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
 

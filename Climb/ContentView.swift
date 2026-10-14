@@ -63,7 +63,7 @@ struct ContentView: View {
                 tabs
             }
         }
-        .sheet(isPresented: $keyPrompt.riotKeyRejected) {
+        .sheet(isPresented: $keyPrompt.isPresented) {
             NavigationStack {
                 APIKeysView(reason: "Riot rejected the API key. Personal keys expire after 24 hours — paste today's to keep syncing.")
             }
@@ -124,6 +124,10 @@ struct ContentView: View {
             .tag(Tab.search)
         }
         .contentMargins(.bottom, keyboardShown || screenHidesBar ? 0 : barHeight, for: .scrollContent)
+        // The soft edge let content show through the bar: over the dark
+        // splash or a chart the title flipped to white and stayed white over
+        // the light cards after it, and headings slid under the clock.
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !keyboardShown && !screenHidesBar {
                 ClimbTabBar(selection: $selectedTab)
@@ -167,8 +171,8 @@ extension View {
     func hidesTabBar() -> some View { preference(key: TabBarHiddenKey.self, value: true) }
 }
 
-/// The floating bottom bar: a white capsule where the selected tab is a
-/// gradient pill with its name, and the others are icons only.
+/// The floating bottom bar: a white capsule of labelled tabs, the selected
+/// one on a gradient pill.
 private struct ClimbTabBar: View {
     @Binding var selection: ContentView.Tab
     @Namespace private var pill
@@ -180,19 +184,19 @@ private struct ClimbTabBar: View {
                 Button {
                     withAnimation(.snappy(duration: 0.3)) { selection = tab }
                 } label: {
-                    HStack(spacing: 6) {
+                    // Every tab labelled: icon-only, the star for Champions
+                    // was a guess for anyone who doesn't play.
+                    VStack(spacing: 2) {
                         Image(systemName: tab.icon)
                             .font(.body.weight(.semibold))
-                        if selected {
-                            Text(tab.title)
-                                .font(.subheadline.weight(.bold))
-                                .lineLimit(1)
-                                .fixedSize()
-                        }
+                        Text(tab.title)
+                            .font(.caption2.weight(.bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                     .foregroundStyle(selected ? Color.white : Color.secondary)
-                    .padding(.horizontal, 16)
-                    .frame(maxWidth: selected ? nil : .infinity, minHeight: 48)
+                    .padding(.horizontal, 4)
+                    .frame(maxWidth: .infinity, minHeight: 50)
                     .background {
                         if selected {
                             Capsule()

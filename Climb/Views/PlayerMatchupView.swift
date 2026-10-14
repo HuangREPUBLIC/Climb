@@ -72,6 +72,14 @@ struct PlayerMatchupView: View {
     private func comparisonCard(me: MatchParticipantSummary, opponent: MatchParticipantSummary) -> some View {
         let axes = radarAxes(me: me, opponent: opponent)
         return VStack(spacing: 0) {
+            // A and B meant nothing until you knew the rows were pickers.
+            Text("Tap two champions to compare them, marked A and B. Blue is your team, red the enemy.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
             opponentPicker
             versusBanner(me: me, opponent: opponent)
 
