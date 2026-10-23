@@ -1,18 +1,13 @@
 import SwiftUI
 import SwiftData
 
-/// The Matches tab (战绩): who you are, how you've been playing, and every
-/// synced game on one scroll, the way 掌盟 lays it out — rather than a profile
-/// previewing five games and a second tab listing the same ones again.
+/// The Matches tab: who you are, how you've been playing and every synced game on one scroll, op.gg-style.
 struct ProfileView: View {
-    /// The Matches stack's path, owned by ContentView. A match is pushed onto
-    /// it rather than presented by item, so links inside the match screen
-    /// (the AI coach) push onto the same stack.
+    /// Owned by ContentView. Matches are pushed (not presented by item) so the coach pushes onto the same stack.
     @Binding var path: NavigationPath
     @Query private var accounts: [LinkedAccount]
     @Query(sort: \Match.timestamp, order: .reverse) private var allMatches: [Match]
     @AppStorage("selectedGame") private var selectedGame: Game = .league
-    @State private var showingLinkAccount = false
     @State private var queueFilter: String?
     @State private var tagFilter: String?
     @State private var isLoadingOlder = false
@@ -32,16 +27,7 @@ struct ProfileView: View {
                 && (tagFilter.map { match.tags.contains($0) } ?? true)
         }
     }
-    /// Modes the player actually has games in, most played first.
-    private var queues: [String] {
-        Dictionary(grouping: matches, by: \.queueType)
-            .sorted { $0.value.count > $1.value.count }
-            .map(\.key)
-    }
-    private var tags: [String] {
-        var seen = Set<String>()
-        return matches.flatMap(\.tags).filter { seen.insert($0).inserted }.sorted()
-    }
+    private var tags: [String] { Set(matches.flatMap(\.tags)).sorted() }
 
     var body: some View {
         let filtered = filteredMatches
@@ -51,14 +37,14 @@ struct ProfileView: View {
                     header
                     expiredKeyNotice
                     unpublishedMatchNotice
-                    // The numbers follow the filters, so picking "Ranked
-                    // Solo/Duo" answers "how am I doing in ranked".
+                    // The numbers follow the filters, so "Ranked Solo/Duo" answers "how am I doing in ranked".
                     if !filtered.isEmpty { ProfileSummaryStrip(matches: filtered) }
                 }
                 .padding(.horizontal)
 
                 VStack(alignment: .leading, spacing: 0) {
                     if !matches.isEmpty { recentMatchesHeading(count: filtered.count) }
+                    let queues = matches.queuesByPlays
                     if queues.count > 1 {
                         TagFilterBar(tags: queues, selection: $queueFilter)
                     }
@@ -96,31 +82,30 @@ struct ProfileView: View {
             .padding(.bottom)
             .readableContentWidth()
         }
-        .background(Theme.background)
-        // The standard system gesture for "get the latest data".
+        .screen("Matches")
         .refreshable { try? await MatchImportService.syncLinkedAccount(context: modelContext) }
-        .navigationTitle("Matches")
-        .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Match.self) { match in
             MatchDetailView(match: match)
         }
-        .toolbar {
-            if GameFilterPicker.isNeeded(selection: selectedGame, availableGames: Set(allMatches.map(\.game))) {
-                ToolbarItem(placement: .topBarLeading) {
-                    GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game)))
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showingLinkAccount = true
-                } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                }
-                .accessibilityLabel("Sync or switch Riot account")
+        .navigationDestination(for: MatchesRoute.self) { route in
+            switch route {
+            case .savedGames: SavedGamesView(path: $path)
+            case .settings: SettingsView()
             }
         }
-        .sheet(isPresented: $showingLinkAccount) {
-            LinkAccountView()
+        .toolbar {
+            GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game)))
+            // One group, so the two share a glass capsule.
+            ToolbarItemGroup(placement: .primaryAction) {
+                NavigationLink(value: MatchesRoute.savedGames) {
+                    Image(systemName: "bookmark")
+                }
+                .accessibilityLabel("Saved games")
+                NavigationLink(value: MatchesRoute.settings) {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Settings")
+            }
         }
         .sheet(item: $taggingMatch) { match in
             TagSheet(match: match, vocabulary: ReflectionTag.vocabulary(for: match.game, usedIn: allMatches))
@@ -139,7 +124,6 @@ struct ProfileView: View {
             level: account?.summonerLevel,
             matches: matches
         ) {
-            // ContentView shows onboarding until there is an account.
             if let account {
                 BannerTitle(text: account.riotID)
                 RankChip(tier: account.rankTier, division: account.rankDivision, leaguePoints: account.leaguePoints)
@@ -147,7 +131,6 @@ struct ProfileView: View {
         }
     }
 
-    /// Names the list, and says how many games the filters leave.
     private func recentMatchesHeading(count: Int) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("Recent Matches")
@@ -165,14 +148,12 @@ struct ProfileView: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    /// The key sheet opens by itself only once; after Cancel this says why
-    /// nothing new is syncing, while the saved games stay browsable.
+    /// The key sheet opens by itself only once; after Cancel this says why nothing new is syncing.
     @ViewBuilder
     private var expiredKeyNotice: some View {
         if keyPrompt.riotKeyRejected {
             Button {
-                // A prompt raised while another sheet was up never showed
-                // but left the flag set; setting true again would do nothing.
+                // A prompt raised under another sheet never showed but left the flag set; toggle to re-fire.
                 keyPrompt.isPresented = false
                 Task { @MainActor in keyPrompt.isPresented = true }
             } label: {
@@ -182,7 +163,7 @@ struct ProfileView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Riot API key expired")
                             .font(.subheadline.weight(.semibold))
-                        Text("Showing saved games. Paste today's key to sync new ones.")
+                        Text("Showing games synced earlier. Paste today's key to sync new ones.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -195,24 +176,17 @@ struct ProfileView: View {
                 .foregroundStyle(.primary)
                 .padding(Theme.cardPadding)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.orange.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             }
             .buttonStyle(PressableButtonStyle())
         }
     }
 
-    /// Riot's match API can run behind the account itself — event queues in
-    /// particular go unpublished for hours. Without saying so the app shows a
-    /// stale newest match and reads as broken, when nothing here can fix it.
-    ///
-    /// `lastRiotActivityDate` comes from Summoner-V4's `revisionDate`, which is
-    /// already fetched on every sync, so this costs no extra request.
+    /// Riot's match API can lag the account by hours (event queues especially); saying so keeps a stale newest
+    /// match from reading as broken. Uses Summoner-V4's `revisionDate`, already fetched on every sync.
     @ViewBuilder
     private var unpublishedMatchNotice: some View {
-        // Three hours of slack: a long game plus the gap between its start
-        // timestamp and the account's revision is legitimately a couple of
-        // hours, and a hint that cries wolf is worse than no hint.
+        // 3h of slack: a long game plus start-to-revision lag is ~2h, and a false hint is worse than none.
         if let activity = account?.lastRiotActivityDate,
            let newest = matches.first?.timestamp,
            activity.timeIntervalSince(newest) > 3 * 60 * 60 {
@@ -230,16 +204,13 @@ struct ProfileView: View {
             }
             .padding(Theme.cardPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .accessibilityElement(children: .combine)
         }
     }
 
-    /// Scrolling to the end of the list loads the next page; the button is
-    /// for a retry, and for a filtered list, where reaching the end isn't a
-    /// request for more (each page costs ~40 of a personal key's 100 requests
-    /// per two minutes).
+    /// Scrolling to the end loads the next page; the button is for retries and for filtered lists, where
+    /// the end isn't a request for more (a page costs ~40 of a personal key's 100 requests per two minutes).
     private var loadOlderButton: some View {
         Button {
             loadOlder()
@@ -273,12 +244,16 @@ struct ProfileView: View {
                 reachedEnd = added == 0
                 olderLoadFailed = false
             } catch {
-                // A rate limit isn't the end of history — offer a retry.
                 olderLoadFailed = true
             }
             isLoadingOlder = false
         }
     }
+}
+
+/// The Matches top bar's screens, pushed by value so a saved game opened from them can still push the coach.
+enum MatchesRoute: Hashable {
+    case savedGames, settings
 }
 
 /// Tags for one match from the long-press menu, without opening the match.
@@ -294,9 +269,7 @@ private struct TagSheet: View {
                 TagEditor(tags: $match.tags, vocabulary: vocabulary)
                     .padding()
             }
-            .background(Theme.background)
-            .navigationTitle("Tags")
-            .navigationBarTitleDisplayMode(.inline)
+            .screen("Tags")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

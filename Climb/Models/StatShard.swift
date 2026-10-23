@@ -1,24 +1,16 @@
 import Foundation
 
-/// The three stat shards a player picks under their rune trees.
-///
-/// Riot reports these in `perks.statPerks` as three plain ids, and — unlike
-/// every other rune — they are *not* in `runesReforged.json`, so there is no
-/// name or icon to look up there. Data Dragon serves their art from a fixed
-/// `perk-images/StatMods/` folder instead, which is what this table is for.
+/// The stat shards under the rune trees. Unlike other runes they aren't in `runesReforged.json`,
+/// so this table supplies their names and icons (art lives in `perk-images/StatMods/`).
 enum StatShard {
     struct Info {
         let name: String
         let effect: String
-        /// Path under Data Dragon's `cdn/img/`, matching how rune icons are
-        /// addressed elsewhere so `runeIconURL(for:)` can serve both.
+        /// Path under Data Dragon's `cdn/img/`, like rune icons, so `runeIconURL(for:)` serves both.
         let iconPath: String
     }
 
-    /// Keyed by Riot's perk id. Every value Riot can send is listed once rather
-    /// than split per row — which row a shard came from is implied by its
-    /// position in `statPerks`, and a per-row table would be three places to
-    /// get out of date instead of one.
+    /// By Riot's perk id. One table, not per row: the row is implied by the position in `statPerks`.
     static func info(for id: Int) -> Info? {
         switch id {
         case 5001: return Info(name: "Health Scaling", effect: "Health that grows with level", iconPath: file("StatModsHealthScalingIcon"))
@@ -33,8 +25,6 @@ enum StatShard {
         default: return nil
         }
     }
-
-    static func isShard(_ id: Int) -> Bool { info(for: id) != nil }
 
     private static func file(_ name: String) -> String {
         "perk-images/StatMods/\(name).png"

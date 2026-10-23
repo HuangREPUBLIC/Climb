@@ -19,7 +19,6 @@ final class GoldTimelinePoint {
 
     /// Positive means the linked player's team was ahead at this minute.
     var goldDifference: Int { allyGold - enemyGold }
-    var xpDifference: Int { allyXP - enemyXP }
 
     init(minute: Int, allyGold: Int, enemyGold: Int, allyXP: Int = 0, enemyXP: Int = 0) {
         self.minute = minute

@@ -1,14 +1,9 @@
 import SwiftUI
 
-/// A Riot ID and the server it lives on — everywhere the app asks for a player.
-///
-/// The name and tag are one control split by a "#", because that is how a
-/// Riot ID is written everywhere else; two separate rows made the player
-/// take their own ID apart to enter it.
+/// A Riot ID and its server; name and tag are one control split by "#", as Riot IDs are written, not two rows.
 struct RiotIDInput: View {
     enum Field { case name, tag }
 
-    /// Both halves filled in.
     static func isComplete(gameName: String, tagLine: String) -> Bool {
         !gameName.trimmingCharacters(in: .whitespaces).isEmpty && !tagLine.trimmingCharacters(in: .whitespaces).isEmpty
     }
@@ -57,8 +52,7 @@ struct RiotIDInput: View {
         }
 
         Group {
-            // Side by side reads as one identity; at accessibility sizes the
-            // tag would be squeezed to a couple of characters, so it stacks.
+            // Side by side reads as one identity; at accessibility sizes the tag would be squeezed, so stack.
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 8) {
                     name
@@ -78,12 +72,10 @@ struct RiotIDInput: View {
         .autocorrectionDisabled()
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Theme.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 
-    /// A menu rather than a `Picker` row, matching the game switcher in the
-    /// navigation bar — the app already has one capsule-shaped chooser.
+    /// A menu rather than a `Picker` row, matching the game switcher in the navigation bar.
     private var serverMenu: some View {
         Menu {
             Picker("Server", selection: $platform) {
@@ -101,8 +93,7 @@ struct RiotIDInput: View {
             .foregroundStyle(Theme.accent)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(Theme.accent.opacity(0.12))
-            .clipShape(Capsule())
+            .background(Theme.accent.opacity(0.12), in: Capsule())
         }
     }
 }

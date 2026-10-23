@@ -1,9 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// The Search tab: look up any player by Riot ID — op.gg's core feature — and
-/// keep the ones you check often. Their profile carries the head-to-head
-/// against your own games, so there is no separate compare screen.
+/// The Search tab: look up any player by Riot ID and follow the ones you check often.
 struct SearchView: View {
     @Query private var accounts: [LinkedAccount]
     @Query(sort: \SavedPlayer.addedAt, order: .reverse) private var savedPlayers: [SavedPlayer]
@@ -25,9 +23,7 @@ struct SearchView: View {
     }
 
     private var canSearch: Bool {
-        !isSearching
-            && !gameName.trimmingCharacters(in: .whitespaces).isEmpty
-            && !tagLine.trimmingCharacters(in: .whitespaces).isEmpty
+        !isSearching && RiotIDInput.isComplete(gameName: gameName, tagLine: tagLine)
     }
 
     var body: some View {
@@ -51,16 +47,14 @@ struct SearchView: View {
                 }
 
                 if !savedPlayers.isEmpty {
-                    friendsList
+                    followingList
                 }
             }
             .padding()
             .readableContentWidth()
         }
-        .background(Theme.background)
+        .screen("Search")
         .scrollDismissesKeyboard(.interactively)
-        .navigationTitle("Search")
-        .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $found) { player in
             PlayerProfileView(
                 puuid: player.puuid,
@@ -71,7 +65,7 @@ struct SearchView: View {
             )
         }
         .onAppear {
-            // Friends are usually on your own server.
+            // Players you follow are usually on your own server.
             if let own = accounts.first.flatMap({ RiotPlatform(rawValue: $0.platform) }), gameName.isEmpty {
                 platform = own
             }
@@ -103,27 +97,28 @@ struct SearchView: View {
         .disabled(!canSearch)
     }
 
-    private var friendsList: some View {
+    /// One-way, like op.gg's favourites: nobody follows back, so it isn't a friends list.
+    private var followingList: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Friends").font(.headline)
+            Text("Following").font(.headline)
             VStack(spacing: 0) {
-                ForEach(Array(savedPlayers.enumerated()), id: \.element.key) { index, friend in
+                ForEach(Array(savedPlayers.enumerated()), id: \.element.key) { index, player in
                     if index > 0 { Divider() }
                     NavigationLink {
-                        let friendPlatform = RiotPlatform(rawValue: friend.platform) ?? platform
+                        let playerPlatform = RiotPlatform(rawValue: player.platform) ?? platform
                         PlayerProfileView(
                             puuid: nil,
-                            riotIdGameName: friend.gameName,
-                            riotIdTagline: friend.tagLine,
-                            region: friendPlatform.region,
-                            platform: friendPlatform
+                            riotIdGameName: player.gameName,
+                            riotIdTagline: player.tagLine,
+                            region: playerPlatform.region,
+                            platform: playerPlatform
                         )
                     } label: {
                         HStack {
-                            Image(systemName: "star.fill").foregroundStyle(.yellow)
-                            Text(friend.riotID).foregroundStyle(.primary)
+                            Image(systemName: "person.fill.checkmark").foregroundStyle(Theme.accent)
+                            Text(player.riotID).foregroundStyle(.primary)
                             Spacer()
-                            Text(RiotPlatform(rawValue: friend.platform)?.displayName ?? friend.platform)
+                            Text(RiotPlatform(rawValue: player.platform)?.displayName ?? player.platform)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Image(systemName: "chevron.right")
@@ -135,8 +130,8 @@ struct SearchView: View {
                     }
                     .buttonStyle(PressableButtonStyle())
                     .contextMenu {
-                        Button("Remove from Friends", systemImage: "star.slash", role: .destructive) {
-                            modelContext.delete(friend)
+                        Button("Unfollow", systemImage: "person.badge.minus", role: .destructive) {
+                            modelContext.delete(player)
                         }
                     }
                 }
@@ -146,8 +141,7 @@ struct SearchView: View {
         }
     }
 
-    /// Resolved here rather than on the profile, so a typo is reported beside
-    /// the field that has it instead of on a pushed screen.
+    /// Resolved here, not on the profile, so a typo is reported beside the field rather than on a pushed screen.
     private func search() {
         let name = gameName.trimmingCharacters(in: .whitespaces)
         let tag = tagLine.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "#"))

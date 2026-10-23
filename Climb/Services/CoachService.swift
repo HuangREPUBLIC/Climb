@@ -1,7 +1,6 @@
 import Foundation
 import SwiftData
 
-@MainActor
 enum CoachService {
     static func conversation(for match: Match, context: ModelContext) -> CoachConversation {
         if let existing = match.coachConversation {
@@ -21,10 +20,8 @@ enum CoachService {
         allMatches: [Match],
         context: ModelContext
     ) async throws {
-        // Enforced here, not only by hiding the button: everything the coach
-        // is told ("your recent form", "your tags") assumes the game is the
-        // user's, so a browsed game would be analysed against the wrong person.
-        guard match.isOwnHistory else { throw AICoachError.notYourGame }
+        // Enforced here, not just in the UI: every fact the coach gets assumes the user's own game.
+        guard match.isOwnHistory else { throw Failure(message: "The AI coach only reviews your own games.") }
         let historyBeforeReply = conversation.messages
 
         let playerMessage = ChatMessage(role: .player, text: userMessage)
@@ -42,8 +39,7 @@ enum CoachService {
                 newUserMessage: userMessage
             )
         } catch {
-            // An unanswered question left in the history reads as though the
-            // coach ignored it, and would be resent as context next time.
+            // An unanswered question in the history reads as ignored and gets resent as context.
             conversation.messages.removeAll { $0 === playerMessage }
             context.delete(playerMessage)
             try? context.save()
@@ -57,15 +53,12 @@ enum CoachService {
         try? context.save()
     }
 
-    /// Reviews being written, by match id. The request belongs here rather
-    /// than to the card: leaving the screen mustn't throw away a reply already
-    /// paid for, and coming back should wait for it instead of asking again.
+    /// Reviews in flight by match id, so leaving the screen doesn't discard a paid-for reply.
     private static var reviewsInFlight: [String: Task<Void, Error>] = [:]
 
-    /// The post-game review card: one reply, generated the first time a match
-    /// is opened and kept on the match so reopening it costs nothing.
+    /// The post-game review card: one reply, generated on first open and kept on the match.
     static func review(match: Match, allMatches: [Match], context: ModelContext) async throws {
-        guard match.isOwnHistory else { throw AICoachError.notYourGame }
+        guard match.isOwnHistory else { throw Failure(message: "The AI coach only reviews your own games.") }
         if let running = reviewsInFlight[match.id] { return try await running.value }
 
         let matchID = match.id
@@ -84,13 +77,9 @@ enum CoachService {
         try await task.value
     }
 
-    /// The trend card's read of `TrendSummary`: what keeps costing games and
-    /// the one habit to fix first. One request at a time, for the same reason
-    /// as reviews.
+    /// Trend diagnoses in flight, keyed by the set of games summarised; same reason as reviews.
     private static var diagnosesInFlight: [String: Task<String, Error>] = [:]
 
-    /// `key` identifies the set of games summarised; a request for one set
-    /// is never handed to a caller asking about another.
     static func diagnose(_ summary: TrendSummary, key: String) async throws -> String {
         if let running = diagnosesInFlight[key] { return try await running.value }
         let prompt = [
@@ -109,9 +98,8 @@ enum CoachService {
         return try await task.value
     }
 
-    /// The app parses this shape into a verdict, findings and one action (see
-    /// CoachReply). Prose still renders, just as a plain paragraph, so these
-    /// are instructions rather than a contract the app relies on.
+    /// The app parses this shape into a verdict, findings and one action (see CoachReply); plain
+    /// prose still renders as a paragraph, so it's an instruction, not a contract.
     private static var replyFormat: [String] {
         [
             "Answer in this shape, and keep it short — the player is reading on a phone:",
@@ -129,8 +117,7 @@ enum CoachService {
             "Ground every answer in the player's own stats below — never give generic strategy advice."
         ] + replyFormat
 
-        // Browsed copies of other players' games live in the same store, and
-        // the caller's order isn't guaranteed — newest first, own games only.
+        // Browsed copies share this store and the caller's order varies: own games, newest first.
         let ownMatches = allMatches.filter(\.isOwnHistory).sorted { $0.timestamp > $1.timestamp }
 
         if let stats = match.leagueStats {
@@ -146,9 +133,7 @@ enum CoachService {
             lines.append("Player tagged this match: \(match.tags.joined(separator: ", ")).")
         }
 
-        // The journal is the thing no stats site has. A recurring self-diagnosis
-        // — "Tilted" on six of the last twenty — is exactly the kind of pattern
-        // the coach should be allowed to name, and it can only come from here.
+        // Only the journal can say "Tilted" on six of the last twenty; no stats site has that.
         var tagCounts: [String: Int] = [:]
         for match in ownMatches.prefix(20) {
             for tag in match.tags { tagCounts[tag, default: 0] += 1 }
@@ -165,9 +150,7 @@ enum CoachService {
         return lines.joined(separator: "\n")
     }
 
-    /// Everything stored about one League game, as the facts the model reads.
-    /// The coach can't watch the game, so any number left out here is a
-    /// question it can only answer generically.
+    /// One League game as facts for the model; anything left out can only be answered generically.
     private static func leagueFacts(for match: Match, stats: LeagueStats, ownMatches: [Match]) async -> [String] {
         var lines: [String] = []
         let minutes = match.minutes
@@ -176,8 +159,7 @@ enum CoachService {
             whole > 0 ? Int((Double(part) / Double(whole) * 100).rounded()) : 0
         }
 
-        // Everything is read before the one `await` (item names, at the end):
-        // a launch rebuild may replace these rows while that lookup runs.
+        // Read before the one `await` (item names): a launch rebuild may replace these rows.
         let itemIDs = stats.items.filter { $0 != 0 }
         let champion = stats.champion
         let position = OPGGPosition(role: stats.role)
@@ -213,8 +195,6 @@ enum CoachService {
         if stats.objectivesStolen > 0 { highlights.append("\(stats.objectivesStolen) objectives stolen") }
         if !highlights.isEmpty { lines.append("Highlights: \(highlights.joined(separator: ", ")).") }
 
-        // The lane opponent, and who actually won the fights between you —
-        // reconstructed from the timeline at import.
         if let me, let opponent = match.laneOpponent(of: me) {
             laneOpponentChampion = opponent.champion
             var line = "Lane opponent: \(opponent.champion), \(opponent.kills)/\(opponent.deaths)/\(opponent.assists), \(opponent.creepScore) CS, \(opponent.goldEarned) gold, \(opponent.damageDealtToChampions) champion damage."
@@ -224,8 +204,7 @@ enum CoachService {
             lines.append(line)
         }
 
-        // The final frame repeats its minute (20:00 and a 20:30 ending share
-        // "20"), so the last minute is left out rather than guessed at.
+        // A 20:30 ending shares minute "20" with the 20:00 frame, so the last minute is left out.
         let lastMinute = match.goldTimeline.map(\.minute).max() ?? 0
         let curve = Dictionary(
             match.goldTimeline.filter { $0.minute < lastMinute }.map { ($0.minute, $0.goldDifference) },
@@ -244,7 +223,6 @@ enum CoachService {
             lines.append("On \(stats.champion) across \(onChampion.count) stored games: \(wins)W-\(onChampion.count - wins)L.")
         }
 
-        // Form coming into this game, not games played after it.
         let recent = ownMatches.filter { $0.leagueStats != nil && $0.timestamp < match.timestamp }.prefix(10)
         if !recent.isEmpty {
             let wins = recent.filter(\.win).count
@@ -259,9 +237,8 @@ enum CoachService {
         }
         if !itemNames.isEmpty { lines.append("Final items: \(itemNames.joined(separator: ", ")).") }
 
-        // This patch's meta from op.gg, so the coach can tell a build or a
-        // matchup problem apart from a play problem. Best-effort: no line if
-        // op.gg is unreachable.
+        // This patch's op.gg meta, so the coach can tell a build or matchup problem from a play
+        // problem. Best-effort: no line if op.gg is unreachable.
         if let position, let meta = try? await OPGGClient.shared.analysis(champion: champion, position: position) {
             if let core = meta.coreItems {
                 var coreNames: [String] = []

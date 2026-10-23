@@ -2,16 +2,12 @@ import Foundation
 
 struct RiotAccountResponse: Decodable {
     let puuid: String
-    let gameName: String?
-    let tagLine: String?
 }
 
 struct RiotSummonerResponse: Decodable {
     let profileIconId: Int
     let summonerLevel: Int
-    /// Milliseconds since epoch, updated when the account last did something —
-    /// in practice, finished a game. Free to read here because this endpoint is
-    /// already called on every sync for the icon and level.
+    /// Milliseconds since epoch of the account's last activity, in practice a finished game.
     let revisionDate: Double?
 }
 
@@ -51,8 +47,7 @@ struct RiotMatchResponse: Decodable {
             let tower: Objective
             let inhibitor: Objective
             let riftHerald: Objective
-            /// Voidgrubs, added in 2024 — optional because matches played before
-            /// they existed simply don't carry the field.
+            /// Voidgrubs: optional, older matches lack the field.
             let horde: Objective?
 
             struct Objective: Decodable {
@@ -95,11 +90,8 @@ struct RiotMatchResponse: Decodable {
         let pentaKills: Int
         let perks: Perks
 
-        // Optional because older matches (and some game modes) omit them —
-        // decoding must not fail just because a 2021 game lacks a field.
-        // These are *counts of things killed/destroyed by this player*, not
-        // damage numbers. Rift Herald and Voidgrubs have no participant-level
-        // field at all, so those come from timeline ELITE_MONSTER_KILL events.
+        // Optional: older matches and some modes omit them, and decoding mustn't fail for that.
+        // Counts of things this player killed or destroyed, not damage.
         let turretKills: Int?
         let inhibitorKills: Int?
         let dragonKills: Int?
@@ -117,8 +109,7 @@ struct RiotMatchResponse: Decodable {
 
         struct Perks: Decodable {
             let styles: [Style]
-            /// Optional because Riot omits it on modes that have no shards
-            /// (Arena, and older matches), not because it is ever partial.
+            /// Optional: Riot omits it on modes without shards (Arena) and in older matches.
             let statPerks: StatPerks?
 
             struct StatPerks: Decodable {
@@ -128,8 +119,7 @@ struct RiotMatchResponse: Decodable {
             }
 
             struct Style: Decodable {
-                /// "primaryStyle" or "subStyle" — matched by name rather than
-                /// array position, which Riot does not guarantee.
+                /// "primaryStyle" or "subStyle"; matched by name, as array order isn't guaranteed.
                 let description: String?
                 let style: Int
                 let selections: [Selection]
@@ -150,13 +140,10 @@ struct RiotMatchResponse: Decodable {
             var primaryStyleID: Int { primary?.style ?? 0 }
             var subStyleID: Int { secondary?.style ?? 0 }
 
-            /// All four primary-tree picks, keystone first.
             var primaryRuneIDs: [Int] { primary?.selections.map(\.perk) ?? [] }
-            /// Both secondary-tree picks.
             var secondaryRuneIDs: [Int] { secondary?.selections.map(\.perk) ?? [] }
 
-            /// The three stat shards in Riot's own row order — offence, flex,
-            /// defence — which is the order the client shows them in.
+            /// The stat shards in Riot's row order: offense, flex, defense.
             var statPerkIDs: [Int] {
                 guard let statPerks else { return [] }
                 return [statPerks.offense, statPerks.flex, statPerks.defense]
@@ -165,11 +152,8 @@ struct RiotMatchResponse: Decodable {
     }
 }
 
-/// Match-V5 timeline — the only place Riot records *who* killed *whom*.
-/// The base match response only has aggregate totals, so any "you vs this
-/// specific opponent" kill/death/assist breakdown has to come from here.
-/// `participantId` (1-10) is NOT the same as `puuid` — it's the opponent's
-/// 1-based index into `RiotMatchResponse.Info.participants`.
+/// Match-V5 timeline: the only record of who killed whom (the match response has only totals).
+/// `participantId` is a 1-based index into `RiotMatchResponse.Info.participants`, not a puuid.
 struct RiotMatchTimelineResponse: Decodable {
     let info: Info
 
@@ -179,8 +163,7 @@ struct RiotMatchTimelineResponse: Decodable {
 
     struct Frame: Decodable {
         let events: [Event]
-        /// Keyed by participantId as a string ("1"..."10"); one snapshot per
-        /// frame (~1 minute), which is what makes a gold/XP curve possible.
+        /// Keyed by participantId as a string ("1"..."10"); one snapshot per frame (~1 minute).
         let participantFrames: [String: ParticipantFrame]?
         /// Milliseconds since game start.
         let timestamp: Int?
@@ -197,16 +180,14 @@ struct RiotMatchTimelineResponse: Decodable {
         let killerId: Int?
         let victimId: Int?
         let assistingParticipantIds: [Int]?
-        /// On ELITE_MONSTER_KILL: DRAGON / BARON_NASHOR / RIFTHERALD /
-        /// HORDE (Voidgrubs) / ATAKHAN. The only place Herald and Voidgrub
-        /// credit is recorded — the match summary has no field for them.
+        /// On ELITE_MONSTER_KILL: DRAGON, BARON_NASHOR, RIFTHERALD, HORDE (Voidgrubs) or ATAKHAN.
+        /// The only record of Herald and Voidgrub credit; the match summary has no field for them.
         let monsterType: String?
         let monsterSubType: String?
     }
 }
 
-/// TFT-Match-V1 responses use snake_case keys; decode with a
-/// `.convertFromSnakeCase` JSONDecoder (RiotAPIClient.fetchTFTMatch does this).
+/// TFT-Match-V1 uses snake_case keys; decode with `.convertFromSnakeCase` (as fetchTFTMatch does).
 struct RiotTFTMatchResponse: Decodable {
     let metadata: Metadata
     let info: Info

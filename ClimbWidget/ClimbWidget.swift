@@ -7,27 +7,28 @@ struct Provider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (SimpleEntry) -> Void) {
-        Task {
-            let snapshot = WidgetSnapshotReader.read()
-            let imageData = await Self.fetchImageData(for: snapshot)
-            completion(SimpleEntry(date: .now, snapshot: snapshot, imageData: imageData))
-        }
+        Task { completion(await Self.entry()) }
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<SimpleEntry>) -> Void) {
-        Task {
-            let snapshot = WidgetSnapshotReader.read()
-            let imageData = await Self.fetchImageData(for: snapshot)
-            let entry = SimpleEntry(date: .now, snapshot: snapshot, imageData: imageData)
-            completion(Timeline(entries: [entry], policy: .never))
-        }
+        Task { completion(Timeline(entries: [await Self.entry()], policy: .never)) }
+    }
+
+    private static func entry() async -> SimpleEntry {
+        let snapshot = WidgetSnapshotReader.read()
+        let imageData = await fetchImageData(for: snapshot)
+        return SimpleEntry(date: .now, snapshot: snapshot, imageData: imageData)
     }
 
     /// Pre-fetches the splash art so it's already in hand when WidgetKit
     /// snapshots the view — AsyncImage's live fetch is too slow for that
     /// snapshot moment and just renders blank forever until the next reload.
+    /// The URL is a minimal copy of the app's DataDragonService.splashArtURL —
+    /// splash art needs no patch version.
     private static func fetchImageData(for snapshot: LatestMatchSnapshot?) async -> Data? {
-        guard let snapshot, let url = WidgetChampionArt.splashURL(for: snapshot.champion) else { return nil }
+        guard let id = snapshot?.champion.filter({ $0.isLetter || $0.isNumber }),
+              let url = URL(string: "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/\(id)_0.jpg")
+        else { return nil }
         return try? await URLSession.shared.data(from: url).0
     }
 }
@@ -114,11 +115,10 @@ struct ClimbWidgetEntryView: View {
     }
 }
 
+@main
 struct ClimbWidget: Widget {
-    let kind: String = "ClimbWidget"
-
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: Provider()) { entry in
+        StaticConfiguration(kind: "ClimbWidget", provider: Provider()) { entry in
             ClimbWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("Latest Match")

@@ -1,11 +1,14 @@
 import SwiftUI
 import SwiftData
 
-/// Another player's page: the same banner and summary as your own, their
-/// history with paging, and how they compare with you — the separate compare
-/// screen this replaced only ever showed that last part.
+struct OtherPlayerProfile {
+    let summoner: RiotSummonerResponse?
+    let solo: RiotLeagueEntry?
+}
+
+/// Another player's page: your own banner and summary layout, their paged history, and a comparison with you.
 struct PlayerProfileView: View {
-    /// Nil when opened from a saved friend; resolved from the Riot ID then.
+    /// Nil when opened from the Following list; resolved from the Riot ID then.
     let puuid: String?
     let riotIdGameName: String
     let riotIdTagline: String
@@ -14,11 +17,8 @@ struct PlayerProfileView: View {
 
     @State private var resolvedPUUID: String?
     @State private var profile: OtherPlayerProfile?
-    /// Cached `Match` copies of their games, so they list with the same rows
-    /// as your own history and open without another request.
     @State private var matches: [Match] = []
-    /// Where the next page starts in Riot's id list — not `matches.count`,
-    /// since a game that failed to load still used up its slot.
+    /// Next page's start in Riot's id list, not `matches.count`: a game that failed to load still used its slot.
     @State private var nextStart = 0
     @State private var isLoading = true
     @State private var isLoadingMore = false
@@ -33,7 +33,7 @@ struct PlayerProfileView: View {
 
     private let pageSize = 15
 
-    private var savedEntry: SavedPlayer? {
+    private var followed: SavedPlayer? {
         let key = SavedPlayer.key(gameName: riotIdGameName, tagLine: riotIdTagline)
         return savedPlayers.first { $0.key == key }
     }
@@ -42,52 +42,42 @@ struct PlayerProfileView: View {
             == LinkedAccount.identity(gameName: riotIdGameName, tagLine: riotIdTagline)
     }
 
-
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                VStack(spacing: 20) {
-                    header
-                    if !matches.isEmpty {
-                        ProfileStatsSection(matches: matches)
-                        if !isYou { compareCard }
-                        matchesCard
-                    } else if isLoading {
-                        ProgressView().padding(.top, 40)
-                    } else if let errorMessage {
-                        ContentUnavailableView(
-                            "Couldn't load matches",
-                            systemImage: "exclamationmark.triangle",
-                            description: Text(errorMessage)
-                        )
-                    } else {
-                        ContentUnavailableView("No recent matches", systemImage: "gamecontroller")
-                    }
+                header
+                if !matches.isEmpty {
+                    ProfileStatsSection(matches: matches)
+                    if !isYou { compareCard }
+                    matchesCard
+                } else if isLoading {
+                    ProgressView().padding(.top, 40)
+                } else if let errorMessage {
+                    ContentUnavailableView(
+                        "Couldn't load matches",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(errorMessage)
+                    )
+                } else {
+                    ContentUnavailableView("No recent matches", systemImage: "gamecontroller")
                 }
-                .padding(.horizontal)
             }
+            .padding(.horizontal)
             .padding(.bottom)
             .readableContentWidth()
         }
-        .background(Theme.background)
-        .navigationTitle("\(riotIdGameName)#\(riotIdTagline)")
-        .navigationBarTitleDisplayMode(.inline)
+        .screen("\(riotIdGameName)#\(riotIdTagline)")
         .navigationDestination(item: $browsedMatch) { match in
             MatchDetailView(match: match)
         }
         .toolbar {
             if !isYou {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        toggleSaved()
-                    } label: {
-                        Image(systemName: savedEntry == nil ? "star" : "star.fill")
-                    }
-                    .accessibilityLabel(savedEntry == nil ? "Add to Friends" : "Remove from Friends")
+                    followButton
                 }
             }
         }
-        .sensoryFeedback(.selection, trigger: savedEntry == nil)
+        .sensoryFeedback(.selection, trigger: followed == nil)
         .task {
             if resolvedPUUID == nil {
                 do {
@@ -107,7 +97,11 @@ struct PlayerProfileView: View {
                 }
             }
             if let platform, profile == nil, let resolvedPUUID {
-                profile = await PlayerProfileService.profile(puuid: resolvedPUUID, platform: platform)
+                let client = RiotAPIClient.shared
+                profile = OtherPlayerProfile(
+                    summoner: try? await client.fetchSummoner(puuid: resolvedPUUID, platform: platform),
+                    solo: await client.soloRank(puuid: resolvedPUUID, platform: platform)
+                )
             }
             await loadPage(reset: true)
         }
@@ -115,16 +109,15 @@ struct PlayerProfileView: View {
 
     // MARK: - Header
 
-    /// Same card as your own profile — see ProfileView.
     private var header: some View {
         ProfileBanner(
-            profileIconID: profile?.profileIconID,
-            level: profile?.summonerLevel,
+            profileIconID: profile?.summoner?.profileIconId,
+            level: profile?.summoner?.summonerLevel,
             matches: matches
         ) {
             BannerTitle(text: "\(riotIdGameName)#\(riotIdTagline)")
             if let profile {
-                RankChip(tier: profile.rankTier, division: profile.rankDivision, leaguePoints: profile.leaguePoints)
+                RankChip(tier: profile.solo?.tier, division: profile.solo?.rank, leaguePoints: profile.solo?.leaguePoints)
             }
         }
     }
@@ -160,8 +153,6 @@ struct PlayerProfileView: View {
         .cardSurface()
     }
 
-    /// Values outside, label between, and a bar split by the two — "who is
-    /// ahead" is a glance rather than a subtraction.
     private func comparisonBar(_ label: String, mine: Double, theirs: Double, display: (Double) -> String) -> some View {
         let fraction = CGFloat(mine / max(mine + theirs, 0.0001))
         return VStack(spacing: 5) {
@@ -198,9 +189,21 @@ struct PlayerProfileView: View {
         }
     }
 
-    private func toggleSaved() {
-        if let savedEntry {
-            modelContext.delete(savedEntry)
+    /// Words, not a bare toolbar icon; prominent as an invitation, plain glass once followed.
+    @ViewBuilder
+    private var followButton: some View {
+        if followed == nil {
+            Button("Follow", action: toggleFollow)
+                .buttonStyle(.glassProminent)
+        } else {
+            Button("Following", action: toggleFollow)
+                .accessibilityHint("Unfollows this player")
+        }
+    }
+
+    private func toggleFollow() {
+        if let followed {
+            modelContext.delete(followed)
         } else {
             modelContext.insert(SavedPlayer(
                 gameName: riotIdGameName,
@@ -233,7 +236,6 @@ struct PlayerProfileView: View {
                 }
                 .buttonStyle(PressableButtonStyle())
                 .disabled(isLoadingMore)
-                // Scrolling to the end loads the next page too.
                 .onScrollVisibilityChange(threshold: 0.5) { visible in
                     if visible, !isLoadingMore { Task { await loadPage(reset: false) } }
                 }
@@ -243,9 +245,7 @@ struct PlayerProfileView: View {
 
     // MARK: - Loading
 
-    /// Each game is fetched once and kept as a cached `Match`, so the row can
-    /// show the full build and the detail screen opens instantly. A revisit
-    /// costs one id-list request.
+    /// Each game is fetched once and cached as a `Match`, so a revisit costs one id-list request.
     private func loadPage(reset: Bool) async {
         guard let puuid = resolvedPUUID else { return }
         if reset {
@@ -262,7 +262,6 @@ struct PlayerProfileView: View {
             let pageStart = reset ? 0 : nextStart
             let ids = try await RiotAPIClient.shared.fetchRecentMatchIDs(puuid: puuid, region: region, start: pageStart, count: pageSize)
             nextStart = pageStart + ids.count
-            // A short page means Riot has no more history to give.
             if ids.count < pageSize { reachedEnd = true }
 
             var page: [Match] = []
@@ -274,8 +273,7 @@ struct PlayerProfileView: View {
                         region: region,
                         context: modelContext
                     ), !page.contains(match), reset || !matches.contains(match) {
-                        // Riot's list shifts when they finish a game between
-                        // pages; the same game must not list twice.
+                        // Riot's list shifts when a game finishes between pages; never list a game twice.
                         page.append(match)
                     }
                 } catch RiotAPIError.rateLimited {

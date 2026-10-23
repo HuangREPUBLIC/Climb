@@ -1,16 +1,13 @@
 import SwiftUI
 
-/// A queue or reflection tag, drawn the same way everywhere it appears — in
-/// the editor, the filter bars, and the stats breakdown. Tinted when idle,
-/// solid when selected.
+/// A queue or reflection tag, drawn the same wherever it appears; tinted when idle, solid when selected.
 struct TagChip: View {
     let text: String
     var isSelected: Bool = false
 
     var body: some View {
         let style = ChipStyle.of(text)
-        // Idle chips keep dark text and carry the colour in the icon, fill
-        // and border — several of these tints are too light to be text on white.
+        // Colour goes in the icon, fill and border, not idle text: several tints are too light on white.
         HStack(spacing: 4) {
             Image(systemName: style.icon)
                 .imageScale(.small)
@@ -27,9 +24,8 @@ struct TagChip: View {
     }
 }
 
-/// Colour and icon by what a chip means: each queue its own colour, green
-/// for a tag about something that went well, red for one that didn't, orange
-/// for things outside the player's hands, blue for anything custom.
+/// Colour and icon by meaning: a colour per queue, green for what went well, red for what didn't,
+/// orange for things outside the player's hands, blue for anything custom.
 enum ChipStyle {
     static func of(_ text: String) -> (tint: Color, icon: String) {
         switch text {
@@ -69,12 +65,8 @@ enum ChipStyle {
     }
 }
 
-/// Picks a match's tags from a vocabulary, with a custom entry for whatever the
-/// vocabulary doesn't cover.
-///
-/// Chips rather than a text field: a tag typed freehand every time is a tag
-/// that never matches the last one, and the whole point of tagging is that the
-/// stats screen can group by it afterwards.
+/// Picks a match's tags from a vocabulary, with a custom entry for whatever it doesn't cover.
+/// Chips, not a text field: freehand tags never match the last one, and the stats screen groups by tag.
 struct TagEditor: View {
     @Binding var tags: [String]
     let vocabulary: [String]
@@ -83,20 +75,14 @@ struct TagEditor: View {
     @State private var customText = ""
 
     var body: some View {
-        // Wraps, so the row can't run off the edge as the chips grow with the
-        // user's text size.
         FlowLayout(spacing: 6) {
             ForEach(vocabulary, id: \.self) { tag in
                 Button {
                     toggle(tag)
                 } label: {
                     TagChip(text: tag, isSelected: tags.contains(tag))
-                        // The capsule stays visually compact, but the button's
-                        // own frame — what actually gets hit-tested — is held
-                        // to Apple's 44pt minimum tap target. Below that, a
-                        // caption-sized chip with 5pt vertical padding measures
-                        // under 30pt tall, small enough to cause repeated
-                        // mis-taps against its neighbours.
+                        // The capsule stays compact, but the hit-tested frame meets Apple's 44pt minimum tap
+                        // target; a bare chip is under 30pt tall and mis-taps against its neighbours.
                         .frame(minHeight: 44)
                 }
                 .buttonStyle(PressableButtonStyle())
@@ -112,15 +98,12 @@ struct TagEditor: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color.secondary.opacity(0.12))
-                    .clipShape(Capsule())
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
                     .frame(minHeight: 44)
             }
             .buttonStyle(PressableButtonStyle())
         }
-        // A quick tap-confirmation on every toggle — the chip's own colour
-        // change already shows the new state, but a selection tick makes the
-        // tap register instantly, before the eye catches up.
+        // A selection tick makes the tap register before the eye catches up on the colour change.
         .sensoryFeedback(.selection, trigger: tags)
         .alert("Add a tag", isPresented: $isAddingCustom) {
             TextField("e.g. Bad recall timing", text: $customText)
@@ -146,8 +129,7 @@ struct TagEditor: View {
     }
 }
 
-/// A horizontally scrolling filter row. Shown only where tags already exist —
-/// an empty filter bar is a control that does nothing.
+/// A horizontally scrolling filter row, shown only where tags already exist: an empty bar does nothing.
 struct TagFilterBar: View {
     let tags: [String]
     @Binding var selection: String?

@@ -1,10 +1,8 @@
 import SwiftUI
 import SwiftData
 
-/// Where the two API keys are pasted. Opened from the account sheet, and on
-/// its own when Riot rejects the key — a personal key lasts 24 hours.
+/// Where the two API keys are pasted; opens on its own when Riot rejects the key (personal keys last 24 hours).
 struct APIKeysView: View {
-    /// Why the screen opened by itself, if it did.
     var reason: String?
 
     @Environment(\.dismiss) private var dismiss
@@ -46,8 +44,7 @@ struct APIKeysView: View {
         .navigationTitle("API Keys")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // Pushed from the account sheet it already has a back button;
-            // only the standalone expiry prompt needs its own way out.
+            // Pushed from Settings it already has a back button; only the standalone prompt needs Cancel.
             if reason != nil {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -82,7 +79,6 @@ struct APIKeysView: View {
         APIKeys.gemini = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         APIKeyPrompt.shared.riotKeyRejected = false
         if riotKeyChanged {
-            // A new key is the moment syncing works again.
             let context = modelContext
             Task { try? await MatchImportService.syncLinkedAccount(context: context) }
         }

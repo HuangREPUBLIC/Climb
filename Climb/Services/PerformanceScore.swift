@@ -1,26 +1,14 @@
 import Foundation
 import SwiftUI
 
-/// A 0-10 performance rating for a single match.
-///
-/// Riot does not publish a per-match rating — every companion app's score is
-/// its own formula, and so is this one, which is why the UI labels it "est.".
-///
-/// Two layers:
-/// 1. A raw blend of the stats Riot does give us. Carry impact (KDA, share of
-///    the team's damage) dominates, fight presence (kill participation) comes
-///    next, then farming and vision. Supports are scored on vision instead of
-///    farm, and top laners on how much of the team's damage they soaked instead
-///    of vision.
-/// 2. Stretched against the other nine players in the same game, so the
-///    lobby averages 5.5 whatever the mode, game length or role mix.
-///
-/// Calibrated in Sep 2026 on 19 ranked games (190 player lines) against op.gg's
-/// OP Score: Spearman 0.93, lobby median 5.4, MVP median 9.0, and every role's
-/// median between 5.2 and 5.6.
+/// A 0-10 match rating. Riot publishes none, so this is Climb's own estimate ("est." in the UI).
+/// 1. A raw blend of Riot's stats: carry impact (KDA, damage share) weighs most, then kill
+///    participation, then farm and vision. Supports score on vision instead of farm, top laners
+///    on damage soaked instead of vision.
+/// 2. Stretched against the other nine players, so every lobby averages 5.5 whatever the mode.
+/// Calibrated on 19 ranked games against op.gg's OP Score: Spearman 0.93, lobby median 5.4.
 enum PerformanceScore {
-    /// One player's stat line, detached from SwiftData so the formula is a
-    /// pure function of numbers.
+    /// One player's stats, detached from SwiftData so the formula is a pure function of numbers.
     struct Line {
         let teamId: Int
         let kills: Int
@@ -37,7 +25,6 @@ enum PerformanceScore {
     static let lobbyAverage = 5.5
     private static let stretch = 1.8
 
-    /// Scores for a whole lobby, in the order given.
     static func scores(_ lobby: [Line], minutes: Double) -> [Double] {
         let raw = lobby.map { rawScore($0, lobby: lobby, minutes: max(minutes, 1)) }
         let mean = raw.reduce(0, +) / Double(max(raw.count, 1))
@@ -70,8 +57,7 @@ enum PerformanceScore {
         return score
     }
 
-    /// The score on the match's own performance card: the linked player's, or
-    /// on a browsed game, the player whose history it was opened from.
+    /// The match's performance-card score: the linked player's, or the browsed profile's player.
     static func compute(for match: Match) -> Double? {
         guard let player = match.focusParticipant else { return nil }
         return compute(for: player, in: match)
@@ -82,9 +68,7 @@ enum PerformanceScore {
         return lobbyScores(in: match)[index]
     }
 
-    /// Every player's score from one pass over the lobby, in
-    /// `match.participants` order — awards and ranks read this rather than
-    /// re-scoring the whole lobby once per player.
+    /// All scores in `match.participants` order, so awards and ranks score the lobby only once.
     static func lobbyScores(in match: Match) -> [Double] {
         let lobby = match.participants.map {
             Line(
@@ -97,9 +81,7 @@ enum PerformanceScore {
     }
 
     #if DEBUG
-    /// Runs on every debug launch. Fails loudly if a formula change breaks its
-    /// promises: the lobby averages 5.5, a dominant line scores far above a
-    /// feeding one, and a support isn't punished for not farming.
+    /// Runs on every debug launch; fails loudly if a formula change breaks its promises.
     static func selfCheck() {
         func line(team: Int, k: Int, d: Int, a: Int, dmg: Int, cs: Int, vision: Int, win: Bool, role: String = "Mid") -> Line {
             Line(teamId: team, kills: k, deaths: d, assists: a, damage: dmg, damageTaken: 20_000,
@@ -124,8 +106,7 @@ enum PerformanceScore {
     }
     #endif
 
-    /// MVP is the best score on the winning side, SVP the best on the losing
-    /// side — matching how the reference app labels them.
+    /// MVP: best score on the winning side; SVP: best on the losing side (op.gg's labels).
     static func awards(in match: Match) -> (mvp: String?, svp: String?) {
         let scored = Array(zip(match.participants, lobbyScores(in: match)))
         let mvp = scored.filter { $0.0.win }.max { $0.1 < $1.1 }?.0.puuid
@@ -133,10 +114,7 @@ enum PerformanceScore {
         return (mvp, svp)
     }
 
-    /// Where this player placed among all ten, 1-based.
-    ///
-    /// Ranked on the very number the scoreboard prints beside it, so the badge
-    /// and the figure it sits next to can never disagree.
+    /// 1-based place among all ten, ranked on the printed score so badge and figure can't disagree.
     static func rank(for participant: MatchParticipantSummary, in match: Match) -> Int? {
         let ordered = zip(match.participants.map(\.puuid), lobbyScores(in: match))
             .sorted { $0.1 > $1.1 }
@@ -144,9 +122,8 @@ enum PerformanceScore {
         return index + 1
     }
 
-    /// Traffic light on the 0-10 scale: 6+ green, 4-6 yellow, under 4 red.
-    /// The lobby averages 5.5, so an ordinary game reads yellow. Banded on the
-    /// one-decimal figure shown, so a 3.96 printed as "4.0" isn't red.
+    /// 6+ green, 4-6 yellow, under 4 red (the 5.5 average reads yellow), banded on the one-decimal
+    /// figure shown so a 3.96 printed as "4.0" isn't red.
     static func color(for score: Double) -> Color {
         let shown = (score * 10).rounded() / 10
         return shown >= 6 ? Theme.good : shown >= 4 ? Theme.fair : Theme.poor

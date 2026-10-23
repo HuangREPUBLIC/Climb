@@ -1,24 +1,18 @@
 import SwiftUI
 
-/// The player's full rune page for standard modes — every primary-tree pick
-/// (keystone first, shown larger) and both secondary picks, grouped under
-/// their tree icons. Summoner spells are deliberately absent: they aren't
-/// runes, and they already appear on the scoreboard row itself.
+/// The player's rune page for standard modes: primary picks (keystone larger), secondary picks and shards.
+/// Summoner spells are deliberately absent: they aren't runes and already appear on the scoreboard row.
 struct RuneListView: View {
     let primaryRuneIDs: [Int]
     let secondaryRuneIDs: [Int]
     let primaryStyleID: Int
     let subStyleID: Int
     let statPerkIDs: [Int]
-    let alignment: HorizontalAlignment
 
-    /// Sizes scale with the user's text size so the page doesn't stay tiny
-    /// (or overflow) at accessibility sizes.
     @ScaledMetric(relativeTo: .caption) private var keystoneSize: CGFloat = 30
     @ScaledMetric(relativeTo: .caption) private var runeSize: CGFloat = 22
     @ScaledMetric(relativeTo: .caption2) private var treeSize: CGFloat = 16
-    /// Smaller than a rune — shards are a minor pick, and the client draws
-    /// them smaller too.
+    /// Smaller than a rune: shards are a minor pick, and the client draws them smaller too.
     @ScaledMetric(relativeTo: .caption2) private var shardSize: CGFloat = 18
 
     @State private var selectedRuneID: Int?
@@ -26,14 +20,24 @@ struct RuneListView: View {
     private var hasRunes: Bool { !primaryRuneIDs.isEmpty || !secondaryRuneIDs.isEmpty }
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
             if hasRunes {
-                treeGroup(styleID: primaryStyleID, runeIDs: primaryRuneIDs, isPrimary: true)
-                if !secondaryRuneIDs.isEmpty {
-                    treeGroup(styleID: subStyleID, runeIDs: secondaryRuneIDs, isPrimary: false)
+                group("Primary", styleID: primaryStyleID, ids: primaryRuneIDs) { index, rune in
+                    RuneIconView(runeID: rune, size: index == 0 ? keystoneSize : runeSize)
                 }
+                if !secondaryRuneIDs.isEmpty {
+                    group("Secondary", styleID: subStyleID, ids: secondaryRuneIDs) { _, rune in
+                        RuneIconView(runeID: rune, size: runeSize)
+                    }
+                }
+                // Shards are their own group: Riot picks them from a separate table (`perks.statPerks`).
                 if !statPerkIDs.isEmpty {
-                    shardGroup
+                    group("Shards", ids: statPerkIDs) { _, shard in
+                        // Bare-glyph shard art needs a backing; rune icons carry their own disc.
+                        RuneIconView(runeID: shard, size: shardSize)
+                            .padding(4)
+                            .background(Color.secondary.opacity(0.15), in: Circle())
+                    }
                 }
             } else {
                 Text("No rune data")
@@ -41,64 +45,39 @@ struct RuneListView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .sheet(item: $selectedRuneID) { runeID in
             RuneDetailSheet(runeID: runeID)
         }
     }
 
-    /// Shards get their own group rather than riding along with the secondary
-    /// tree: Riot picks them from a separate table (`perks.statPerks`), and the
-    /// client shows them in their own column as well.
-    private var shardGroup: some View {
-        VStack(alignment: alignment, spacing: 5) {
-            Text("Shards")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            FlowLayout(spacing: 4) {
-                ForEach(Array(statPerkIDs.enumerated()), id: \.offset) { _, shard in
-                    Button {
-                        selectedRuneID = shard
-                    } label: {
-                        // Data Dragon's shard art is a bare glyph on transparency,
-                        // unlike rune icons which carry their own disc — without
-                        // a backing they float loose next to the rows above.
-                        RuneIconView(runeID: shard, size: shardSize)
-                            .padding(4)
-                            .background(Color.secondary.opacity(0.15), in: Circle())
-                    }
-                    .buttonStyle(PressableButtonStyle())
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
-    }
-
-    private func treeGroup(styleID: Int, runeIDs: [Int], isPrimary: Bool) -> some View {
-        VStack(alignment: alignment, spacing: 5) {
+    private func group<Icon: View>(
+        _ title: String,
+        styleID: Int = 0,
+        ids: [Int],
+        @ViewBuilder icon: @escaping (_ index: Int, _ id: Int) -> Icon
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 4) {
                 if styleID != 0 {
                     RuneIconView(runeID: styleID, size: treeSize)
                 }
-                Text(isPrimary ? "Primary" : "Secondary")
+                Text(title)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
-            // Wraps rather than overflowing when icons scale up.
             FlowLayout(spacing: 4) {
-                ForEach(Array(runeIDs.enumerated()), id: \.offset) { index, rune in
+                ForEach(Array(ids.enumerated()), id: \.offset) { index, id in
                     Button {
-                        selectedRuneID = rune
+                        selectedRuneID = id
                     } label: {
-                        RuneIconView(runeID: rune, size: isPrimary && index == 0 ? keystoneSize : runeSize)
+                        icon(index, id)
                     }
                     .buttonStyle(PressableButtonStyle())
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
     }
 }
 
@@ -107,7 +86,6 @@ extension Int: @retroactive Identifiable {
     public var id: Int { self }
 }
 
-/// Name and effect for a tapped rune, resolved from Data Dragon.
 struct RuneDetailSheet: View {
     let runeID: Int
     @Environment(\.dismiss) private var dismiss
@@ -151,16 +129,11 @@ struct RuneDetailSheet: View {
     }
 }
 
-/// Minimal wrapping row: lays children left to right and starts a new line
-/// when the next would overflow. Keeps rune rows intact at large text sizes
-/// instead of letting them run off the edge.
+/// Minimal wrapping row: lays children left to right, wrapping on overflow so rows survive large text sizes.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 4
 
-    /// One row's worth of items plus the tallest height in it, so placement
-    /// can centre each item vertically. Without this the keystone (which is
-    /// larger than the other runes) top-aligns against them and the row looks
-    /// misaligned.
+    /// One row's items and its tallest height, so mixed sizes (the larger keystone) can share a midline.
     private struct Row {
         var sizes: [(index: Int, size: CGSize)] = []
         var height: CGFloat = 0
@@ -191,8 +164,7 @@ struct FlowLayout: Layout {
         let rows = rows(maxWidth: maxWidth, subviews: subviews)
         let height = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(rows.count - 1, 0))
         let widest = rows.map { max($0.width - spacing, 0) }.max() ?? 0
-        // Report the content's own width, not the whole proposal, so a
-        // centred parent can still centre the rows.
+        // Report the content's own width, not the proposal, so a centred parent can still centre the rows.
         return CGSize(width: min(widest, maxWidth), height: height)
     }
 
@@ -201,7 +173,6 @@ struct FlowLayout: Layout {
         for row in rows(maxWidth: bounds.width, subviews: subviews) {
             var x = bounds.minX
             for entry in row.sizes {
-                // Centre within the row so mixed icon sizes share a midline.
                 let yOffset = (row.height - entry.size.height) / 2
                 subviews[entry.index].place(
                     at: CGPoint(x: x, y: y + yOffset),

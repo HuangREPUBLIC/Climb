@@ -185,8 +185,7 @@ private struct WinRateHero: View {
         }
         // The one gradient card on the page: the headline number.
         .padding(Theme.cardPadding)
-        .background(Theme.accentGradient)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .background(Theme.accentGradient, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .shadow(color: Theme.accent.opacity(0.3), radius: 14, y: 6)
         .environment(\.colorScheme, .dark)
     }
@@ -261,10 +260,10 @@ private struct MetricTile: View {
         Chart {
             ForEach(points, id: \.offset) { index, value in
                 AreaMark(x: .value("Game", index), y: .value(metric.title, value))
-                    .foregroundStyle(LinearGradient(colors: [Theme.chart.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
+                    .foregroundStyle(LinearGradient(colors: [Theme.accent.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
                     .interpolationMethod(.catmullRom)
                 LineMark(x: .value("Game", index), y: .value(metric.title, value))
-                    .foregroundStyle(Theme.chart)
+                    .foregroundStyle(Theme.accent)
                     .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
                     .interpolationMethod(.catmullRom)
             }
@@ -316,11 +315,10 @@ private struct HighlightsCard: View {
 
         // Only what happened: a row of 0 triple / quadra / penta kills read
         // as broken, and the last round already dropped zero stats elsewhere.
-        let firstBloodPercent = Int(firstBlood.rounded())
         let counters: [Counter] = [
-            Counter(count: mvp, value: "\(mvp)", label: "MVP", icon: "crown.fill", tint: MatchAward.mvp.tint),
-            Counter(count: svp, value: "\(svp)", label: "SVP", icon: "medal.fill", tint: MatchAward.svp.tint),
-            Counter(count: firstBloodPercent, value: "\(firstBloodPercent)%", label: "First blood", icon: "drop.fill", tint: Theme.poor),
+            Counter(count: mvp, label: "MVP", icon: "crown.fill", tint: MatchAward.mvp.tint),
+            Counter(count: svp, label: "SVP", icon: "medal.fill", tint: MatchAward.svp.tint),
+            Counter(count: Int(firstBlood.rounded()), unit: "%", label: "First blood", icon: "drop.fill", tint: Theme.poor),
             Counter(count: lines.map(\.tripleKills).reduce(0, +), label: "Triple kills", icon: "flame", tint: Theme.fair),
             Counter(count: lines.map(\.quadraKills).reduce(0, +), label: "Quadra kills", icon: "flame.fill", tint: Theme.orange),
             Counter(count: lines.map(\.pentaKills).reduce(0, +), label: "Pentakills", icon: "flame.circle.fill", tint: Theme.poor)
@@ -333,7 +331,7 @@ private struct HighlightsCard: View {
                     ForEach(Array(stride(from: 0, to: counters.count, by: 3)), id: \.self) { start in
                         GridRow {
                             ForEach(counters[start..<min(start + 3, counters.count)], id: \.label) {
-                                counter($0.value, $0.label, $0.icon, $0.tint)
+                                counter("\($0.count)\($0.unit)", $0.label, $0.icon, $0.tint)
                             }
                         }
                     }
@@ -356,18 +354,10 @@ private struct HighlightsCard: View {
 
     private struct Counter {
         let count: Int
-        var value: String
+        var unit = ""
         let label: String
         let icon: String
         let tint: Color
-
-        init(count: Int, value: String? = nil, label: String, icon: String, tint: Color) {
-            self.count = count
-            self.value = value ?? "\(count)"
-            self.label = label
-            self.icon = icon
-            self.tint = tint
-        }
     }
 
     private func counter(_ value: String, _ label: String, _ icon: String, _ tint: Color) -> some View {

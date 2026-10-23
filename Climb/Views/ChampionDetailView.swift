@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// One champion in one lane, from op.gg: how it's doing this patch, what to
-/// build, which runes, the skill order, and who it beats and loses to.
 struct ChampionDetailView: View {
     let champion: String
     let position: OPGGPosition
@@ -33,8 +31,6 @@ struct ChampionDetailView: View {
                 } else if let errorMessage {
                     ErrorCard(message: errorMessage)
                 } else {
-                    // op.gg takes several seconds; cards shaped like the page
-                    // read as "loading", where a lone spinner read as empty.
                     VStack(spacing: Theme.sectionSpacing) {
                         ForEach([90, 230, 150], id: \.self) { height in
                             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
@@ -54,9 +50,7 @@ struct ChampionDetailView: View {
             .padding()
             .readableContentWidth()
         }
-        .background(Theme.background)
-        .navigationTitle(champion)
-        .navigationBarTitleDisplayMode(.inline)
+        .screen(champion)
         .task {
             tier = await OPGGClient.shared.tier(of: champion, position: position)
         }
@@ -76,8 +70,7 @@ struct ChampionDetailView: View {
                 Text(champion).font(.title2.bold())
                 HStack(spacing: 6) {
                     Text(position.title).font(.subheadline).foregroundStyle(.secondary)
-                    // From the lane tier list rather than the analysis reply,
-                    // whose grade uses another scale (Malphite: T1 vs T2).
+                    // Lane tier list, not the analysis reply: its grade uses another scale (Malphite: T1 vs T2).
                     if let tier { TierBadge(tier: tier) }
                 }
             }
@@ -110,7 +103,6 @@ struct ChampionDetailView: View {
                 if index > 0, label == "Core" {
                     Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                 }
-                // Tappable at full size: this is where a player looks items up.
                 ItemIconView(itemID: item, size: itemSize)
             }
             Spacer(minLength: 4)
@@ -145,8 +137,7 @@ struct ChampionDetailView: View {
                 secondaryRuneIDs: runes.secondaryRuneIds,
                 primaryStyleID: runes.primaryPageId,
                 subStyleID: runes.secondaryPageId,
-                statPerkIDs: runes.statModIds,
-                alignment: .leading
+                statPerkIDs: runes.statModIds
             )
             rateLine(play: runes.play, win: runes.win)
         }
@@ -156,7 +147,6 @@ struct ChampionDetailView: View {
 
     private func skillsSection(_ skills: ChampionAnalysis.Skills) -> some View {
         section("Skill order") {
-            // Level by level, the way the client's level-up prompts arrive.
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 9), spacing: 6) {
                 ForEach(Array(skills.order.enumerated()), id: \.offset) { index, key in
                     VStack(spacing: 2) {

@@ -3,8 +3,7 @@ import SwiftUI
 /// Generic N-axis radar/spider chart comparing two datasets, used by
 /// PlayerMatchupView to visualize the linked player vs a chosen opponent.
 struct RadarChartView: View {
-    struct Axis: Identifiable {
-        let id = UUID()
+    struct Axis {
         let label: String
         /// Raw values; normalized per-axis against their own max so the
         /// larger of the two always reaches the outer ring, matching the
@@ -29,11 +28,9 @@ struct RadarChartView: View {
                 axisLines(center: center, radius: radius)
                 polygon(center: center, radius: radius, keyPath: \.secondaryValue)
                     .fill(secondaryColor.opacity(0.25))
-                polygon(center: center, radius: radius, keyPath: \.secondaryValue)
                     .stroke(secondaryColor, lineWidth: 1.5)
                 polygon(center: center, radius: radius, keyPath: \.primaryValue)
                     .fill(primaryColor.opacity(0.25))
-                polygon(center: center, radius: radius, keyPath: \.primaryValue)
                     .stroke(primaryColor, lineWidth: 1.5)
                 labels(center: center, radius: radius)
             }
@@ -63,36 +60,20 @@ struct RadarChartView: View {
     }
 
     private func polygon(center: CGPoint, radius: CGFloat, keyPath: KeyPath<Axis, Double>) -> Path {
-        var path = Path()
-        for (index, axis) in axes.enumerated() {
+        let vertices = axes.enumerated().map { index, axis in
             let other = keyPath == \Axis.primaryValue ? axis.secondaryValue : axis.primaryValue
             let fraction = normalizedFraction(axis[keyPath: keyPath], against: other)
-            let point = point(forFraction: fraction, index: index, center: center, radius: radius)
-            if index == 0 {
-                path.move(to: point)
-            } else {
-                path.addLine(to: point)
-            }
+            return point(forFraction: fraction, index: index, center: center, radius: radius)
         }
-        path.closeSubpath()
-        return path
+        return Path { $0.addLines(vertices); $0.closeSubpath() }
     }
 
     private func gridRings(center: CGPoint, radius: CGFloat) -> some View {
         ForEach(1...ringCount, id: \.self) { ring in
             let fraction = Double(ring) / Double(ringCount)
-            Path { path in
-                for index in 0..<axisCount {
-                    let point = point(forFraction: fraction, index: index, center: center, radius: radius)
-                    if index == 0 {
-                        path.move(to: point)
-                    } else {
-                        path.addLine(to: point)
-                    }
-                }
-                path.closeSubpath()
-            }
-            .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+            let vertices = (0..<axisCount).map { point(forFraction: fraction, index: $0, center: center, radius: radius) }
+            Path { $0.addLines(vertices); $0.closeSubpath() }
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
         }
     }
 

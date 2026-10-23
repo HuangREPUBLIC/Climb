@@ -1,8 +1,6 @@
 import Foundation
 
-/// op.gg's public MCP server (no key needed): champion tiers per lane and
-/// per-champion builds, runes, skills and counters — the meta data Riot's
-/// own API doesn't expose.
+/// op.gg's public MCP server (no key): lane tiers and champion builds Riot's API doesn't expose.
 actor OPGGClient {
     static let shared = OPGGClient()
 
@@ -10,14 +8,8 @@ actor OPGGClient {
     /// Meta shifts by patch, not by minute; six hours keeps tab switches free.
     private var cache: [String: (fetched: Date, json: Data)] = [:]
 
-    struct Failure: LocalizedError {
-        let message: String
-        var errorDescription: String? { message }
-    }
-
-    /// Tier list for one lane, best first.
     func laneMeta(_ position: OPGGPosition) async throws -> [MetaChampion] {
-        let decoded: LaneMetaResponse = try await fetch("lol_list_lane_meta_champions", [
+        let decoded: DataEnvelope<LanePositions> = try await fetch("lol_list_lane_meta_champions", [
             "position": position.rawValue,
             "lang": "en_US",
             "desired_output_fields": ["data.positions.\(position.rawValue)[].{champion,tier,rank,win_rate,pick_rate,ban_rate}"]
@@ -26,7 +18,7 @@ actor OPGGClient {
     }
 
     func analysis(champion: String, position: OPGGPosition) async throws -> ChampionAnalysis {
-        let decoded: ChampionAnalysisResponse = try await fetch("lol_get_champion_analysis", [
+        let decoded: DataEnvelope<ChampionAnalysis> = try await fetch("lol_get_champion_analysis", [
             "game_mode": "ranked",
             "champion": Self.opggName(champion),
             "position": position.rawValue,
@@ -46,30 +38,20 @@ actor OPGGClient {
         return decoded.data
     }
 
-    /// The lane tier list's grade for one champion — the same number the
-    /// Champions list shows, so a champion is never T1 there and T2 here.
+    /// A champion's tier-list grade: the number the Champions list shows, so they never disagree.
     func tier(of champion: String, position: OPGGPosition) async -> Int? {
         let name = Self.opggName(champion)
         return try? await laneMeta(position).first { Self.opggName($0.champion) == name }?.tier
     }
 
-    /// op.gg takes UPPER_SNAKE_CASE and is lenient about the separators, so
-    /// "Kai'Sa", "Dr. Mundo" and "Nunu & Willump" all map by splitting on
-    /// anything that isn't a letter or digit.
+    /// op.gg wants UPPER_SNAKE_CASE: split on non-alphanumerics ("Kai'Sa", "Nunu & Willump").
     static func opggName(_ champion: String) -> String {
         champion.uppercased()
             .split { !$0.isLetter && !$0.isNumber }
             .joined(separator: "_")
     }
 
-    private static let decoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return decoder
-    }()
-
-    /// Cached only once the reply has decoded, so a bad reply isn't served
-    /// again for six hours and "Try again" really tries again.
+    /// Cached only after decoding, so a bad reply isn't replayed for 6 hours; "Try again" retries.
     private func fetch<T: Decodable>(_ tool: String, _ arguments: [String: Any]) async throws -> T {
         let body: [String: Any] = [
             "jsonrpc": "2.0",
@@ -80,7 +62,7 @@ actor OPGGClient {
         let bodyData = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
         let cacheKey = String(decoding: bodyData, as: UTF8.self)
         if let hit = cache[cacheKey], hit.fetched.timeIntervalSinceNow > -6 * 60 * 60,
-           let value = try? Self.decoder.decode(T.self, from: hit.json) {
+           let value = try? JSONDecoder.snakeCase.decode(T.self, from: hit.json) {
             return value
         }
 
@@ -89,8 +71,7 @@ actor OPGGClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.httpBody = bodyData
-        // The coach waits on this too; a stalled op.gg mustn't hold a review
-        // for URLSession's default minute.
+        // The coach waits on this, so a stalled op.gg mustn't last URLSession's default minute.
         request.timeoutInterval = 10
 
         let (data, _) = try await URLSession.shared.data(for: request)
@@ -100,13 +81,12 @@ actor OPGGClient {
             throw Failure(message: envelope.result?.content.first?.text ?? "op.gg returned nothing.")
         }
         let object = try OPGGNotation.parse(text)
-        // JSONSerialization raises an uncatchable exception on anything that
-        // isn't an object or array, or on inf/NaN — check first.
+        // JSONSerialization crashes uncatchably on non-containers and inf/NaN: check first.
         guard JSONSerialization.isValidJSONObject(object) else {
             throw Failure(message: "op.gg sent a reply the app couldn't read.")
         }
         let json = try JSONSerialization.data(withJSONObject: object)
-        let value = try Self.decoder.decode(T.self, from: json)
+        let value = try JSONDecoder.snakeCase.decode(T.self, from: json)
         cache[cacheKey] = (.now, json)
         return value
     }
@@ -123,13 +103,18 @@ actor OPGGClient {
     }
 }
 
+/// Shown, never matched on, so a message is all it carries.
+nonisolated struct Failure: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 nonisolated enum OPGGPosition: String, CaseIterable, Identifiable {
     case top, jungle, mid, adc, support
 
     var id: String { rawValue }
     var title: String { self == .adc ? "ADC" : rawValue.capitalized }
 
-    /// From the app's own role names ("Top", "ADC"…).
     init?(role: String) {
         self.init(rawValue: role.lowercased())
     }
@@ -170,7 +155,6 @@ nonisolated struct ChampionAnalysis: Decodable {
         let rank: Int
     }
     struct Summary: Decodable { let averageStats: Stats }
-    /// A build step: items, boots or summoner spells, with how it performs.
     struct Pick: Decodable {
         let ids: [Int]
         let play: Int
@@ -209,8 +193,7 @@ nonisolated struct ChampionAnalysis: Decodable {
     let strongCounters: [Counter]?
     let weakCounters: [Counter]?
 
-    /// Section by section: a malformed rune page drops the runes card, not
-    /// the whole screen.
+    /// Section by section: a malformed rune page drops the runes card, not the whole screen.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         summary = try? c.decodeIfPresent(Summary.self, forKey: .summary)
@@ -229,22 +212,13 @@ nonisolated struct ChampionAnalysis: Decodable {
     }
 }
 
-nonisolated private struct LaneMetaResponse: Decodable {
-    struct Payload: Decodable { let positions: [String: [MetaChampion]] }
-    let data: Payload
-}
+nonisolated private struct DataEnvelope<T: Decodable>: Decodable { let data: T }
 
-nonisolated private struct ChampionAnalysisResponse: Decodable {
-    let data: ChampionAnalysis
-}
+nonisolated private struct LanePositions: Decodable { let positions: [String: [MetaChampion]] }
 
-/// op.gg's MCP answers in a compact notation meant for LLMs, not JSON:
-///
-///     class Top: champion,win_rate
-///     LolListLaneMetaChampions(Data(Positions([Top("Malphite",0.51)])))
-///
-/// Each `class` line gives a type's field order; calls are positional. This
-/// turns it into plain JSON objects so `Decodable` can take it from there.
+/// op.gg's MCP answers in a compact LLM notation, not JSON: a `class Top: champion,win_rate` line
+/// gives a type's field order and calls are positional (`Top("Malphite",0.51)`). This turns it into
+/// plain JSON objects for `Decodable`.
 nonisolated enum OPGGNotation {
     struct ParseError: Error {}
 
@@ -361,8 +335,7 @@ nonisolated enum OPGGNotation {
     }
 
     #if DEBUG
-    /// Runs on every debug launch; fails loudly if the parser stops mapping
-    /// op.gg's notation (reused class names, nested lists, escaped quotes).
+    /// Debug-launch check: reused class names, nested lists and escaped quotes must still parse.
     static func selfCheck() {
         let sample = """
         class Root: data

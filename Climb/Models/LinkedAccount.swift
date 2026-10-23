@@ -49,11 +49,4 @@ final class LinkedAccount {
     static func identity(gameName: String, tagLine: String) -> String {
         "\(gameName)#\(tagLine)".lowercased().filter { !$0.isWhitespace }
     }
-
-    func lastSyncDate(for game: Game) -> Date? {
-        switch game {
-        case .league: return lastLeagueSyncDate
-        case .tft: return lastTFTSyncDate
-        }
-    }
 }

@@ -17,23 +17,14 @@ final class TeamStats {
 
     var match: Match?
 
-    init(
-        teamId: Int,
-        win: Bool,
-        baronKills: Int = 0,
-        dragonKills: Int = 0,
-        towerKills: Int = 0,
-        inhibitorKills: Int = 0,
-        heraldKills: Int = 0,
-        voidgrubKills: Int = 0
-    ) {
-        self.teamId = teamId
-        self.win = win
-        self.baronKills = baronKills
-        self.dragonKills = dragonKills
-        self.towerKills = towerKills
-        self.inhibitorKills = inhibitorKills
-        self.heraldKills = heraldKills
-        self.voidgrubKills = voidgrubKills
+    init(_ team: RiotMatchResponse.Team) {
+        teamId = team.teamId
+        win = team.win
+        baronKills = team.objectives.baron.kills
+        dragonKills = team.objectives.dragon.kills
+        towerKills = team.objectives.tower.kills
+        inhibitorKills = team.objectives.inhibitor.kills
+        heraldKills = team.objectives.riftHerald.kills
+        voidgrubKills = team.objectives.horde?.kills ?? 0
     }
 }

@@ -6,15 +6,17 @@ import SwiftUI
 /// the long-press preview (`MatchPreviewView`).
 struct MatchRowView: View {
     let match: Match
+    /// Names whose game it is when it isn't yours; Saved Games mixes both.
+    var showsPlayer = false
 
     @ScaledMetric(relativeTo: .headline) private var rawPortraitSize: CGFloat = 56
-    private var portraitSize: CGFloat { rawPortraitSize.capped(at: 84) }
+    /// Grows with the text, but capped: uncapped, the largest sizes leave nothing for the row.
+    private var portraitSize: CGFloat { min(rawPortraitSize, 84) }
     @ScaledMetric(relativeTo: .caption) private var itemSize: CGFloat = 30
 
     /// The three most expensive build items, once Data Dragon's prices load.
     @State private var coreItems: [Int]?
 
-    private var resultColor: Color { match.resultColor }
     /// Build slots 0-5, empties dropped; slot 6 is the trinket.
     private var build: [Int] { (match.leagueStats?.items ?? []).prefix(6).filter { $0 != 0 } }
 
@@ -22,19 +24,36 @@ struct MatchRowView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 6) {
                 portrait
-                OutcomePill(text: match.outcomeText, tint: resultColor)
+                OutcomePill(text: match.outcomeText, tint: match.resultColor)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 6) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(match.leagueStats?.champion ?? "Teamfight Tactics")
-                            .font(.headline)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text(match.leagueStats?.champion ?? "Teamfight Tactics")
+                                .font(.headline)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                            if showsPlayer, !match.isOwnHistory, let player = match.focusParticipant?.riotIdGameName {
+                                Text(player)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            if match.isSaved {
+                                Image(systemName: "bookmark.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.accent)
+                                    .accessibilityLabel("Saved")
+                            }
+                        }
                         queueLine
                     }
                     Spacer(minLength: 4)
-                    if let stats = match.leagueStats { KDABadge(kda: stats.kda) }
+                    if let stats = match.leagueStats {
+                        StatBadge(value: String(format: "%.2f", stats.kda), label: "KDA", tint: Theme.kdaColor(stats.kda))
+                    }
                     RatingBadge(match: match)
                 }
 
@@ -66,7 +85,7 @@ struct MatchRowView: View {
         // Only the strip and the pill carry the result: a whole-card wash
         // turned a losing streak into a screen of pink.
         .background(alignment: .leading) {
-            resultColor.frame(width: 4)
+            match.resultColor.frame(width: 4)
         }
         .cardSurface(padding: 0)
         .accessibilityElement(children: .combine)
@@ -85,15 +104,15 @@ struct MatchRowView: View {
         if let stats = match.leagueStats {
             ChampionIconView(championName: stats.champion, size: portraitSize)
                 .clipShape(RoundedRectangle(cornerRadius: portraitSize * 0.22, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: portraitSize * 0.22, style: .continuous).strokeBorder(resultColor.opacity(0.7), lineWidth: 2))
+                .overlay(RoundedRectangle(cornerRadius: portraitSize * 0.22, style: .continuous).strokeBorder(match.resultColor.opacity(0.7), lineWidth: 2))
         } else if let tft = match.tftStats {
             RoundedRectangle(cornerRadius: portraitSize * 0.22, style: .continuous)
-                .fill(resultColor.opacity(0.15))
+                .fill(match.resultColor.opacity(0.15))
                 .frame(width: portraitSize, height: portraitSize)
                 .overlay {
                     Text("#\(tft.placement)")
                         .font(.title2.bold())
-                        .foregroundStyle(resultColor)
+                        .foregroundStyle(match.resultColor)
                 }
         }
     }
@@ -245,18 +264,7 @@ struct RatingBadge: View {
                         .padding(.vertical, 2)
                         .background(award.tint, in: RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
                 }
-                VStack(spacing: 0) {
-                    Text(String(format: "%.1f", score))
-                        .font(.subheadline.weight(.heavy).monospacedDigit())
-                    Text("RATING")
-                        .scaledFont(7, weight: .bold)
-                        .tracking(0.4)
-                        .opacity(0.8)
-                }
-                .foregroundStyle(tint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
+                StatBadge(value: String(format: "%.1f", score), label: "RATING", tint: tint)
             }
             .fixedSize()
             .accessibilityElement(children: .combine)
@@ -265,17 +273,19 @@ struct RatingBadge: View {
     }
 }
 
-/// The KDA ratio in the rating badge's shape, so the card's two verdicts
-/// sit side by side and read the same way.
-struct KDABadge: View {
-    let kda: Double
+/// A number over a tiny caption in a tinted chip. The KDA ratio and the
+/// rating share it, so the card's two verdicts sit side by side and read the
+/// same way.
+struct StatBadge: View {
+    let value: String
+    let label: String
+    let tint: Color
 
     var body: some View {
-        let tint = Theme.kdaColor(kda)
         VStack(spacing: 0) {
-            Text(String(format: "%.2f", kda))
+            Text(value)
                 .font(.subheadline.weight(.heavy).monospacedDigit())
-            Text("KDA")
+            Text(label)
                 .scaledFont(7, weight: .bold)
                 .tracking(0.4)
                 .opacity(0.8)
@@ -286,7 +296,7 @@ struct KDABadge: View {
         .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
         .fixedSize()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("KDA \(String(format: "%.2f", kda))")
+        .accessibilityLabel("\(label) \(value)")
     }
 }
 
@@ -337,6 +347,7 @@ struct MatchCardList: View {
     let open: (Match) -> Void
     /// Only for your own games; tags on someone else's game go nowhere.
     var editTags: ((Match) -> Void)?
+    var showsPlayer = false
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 12) {
@@ -400,10 +411,13 @@ struct MatchCardList: View {
     }
 
     private func card(_ match: Match) -> some View {
-        Button { open(match) } label: { MatchRowView(match: match) }
+        Button { open(match) } label: { MatchRowView(match: match, showsPlayer: showsPlayer) }
             .buttonStyle(PressableButtonStyle())
             .contextMenu {
                 Button("View details", systemImage: "arrow.up.forward.square") { open(match) }
+                Button(match.isSaved ? "Unsave game" : "Save game", systemImage: match.isSaved ? "bookmark.slash" : "bookmark") {
+                    match.isSaved.toggle()
+                }
                 if let editTags {
                     Button("Add tag", systemImage: "tag") { editTags(match) }
                 }

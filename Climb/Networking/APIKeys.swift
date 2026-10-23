@@ -2,10 +2,7 @@ import Foundation
 import Security
 import Combine
 
-/// The Riot and Gemini keys, kept in the Keychain and pasted in from the app.
-///
-/// A personal Riot key expires every 24 hours; compiled into the build, that
-/// meant a rebuild every day just to keep syncing.
+/// Riot and Gemini keys in the Keychain, pasted in because a personal Riot key expires daily.
 nonisolated enum APIKeys {
     static var riot: String {
         get { read("riotAPIKey") }
@@ -17,9 +14,7 @@ nonisolated enum APIKeys {
         set { write(newValue, account: "geminiAPIKey") }
     }
 
-    /// First launch after keys moved here: carry over whatever Secrets.swift
-    /// holds, so nobody has to paste keys they already configured.
-    /// Once only, so a key the user deliberately cleared stays cleared.
+    /// Seeds keys from Secrets.swift once, so a key the user deliberately cleared stays cleared.
     @MainActor
     static func seedFromSecretsIfNeeded() {
         let seededKey = "apiKeysSeededFromSecrets"
@@ -46,8 +41,7 @@ nonisolated enum APIKeys {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    /// Update in place, adding only when absent — delete-then-add would lose
-    /// the old key if the add failed.
+    /// Update in place, add only when absent: delete-then-add loses the old key if the add fails.
     private static func write(_ value: String, account: String) {
         let identity: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -69,18 +63,14 @@ nonisolated enum APIKeys {
     }
 }
 
-/// Raised when Riot rejects the key, so the app can ask for today's instead
-/// of failing every sync silently.
-@MainActor
+/// Set when Riot rejects the key, so the app can ask for today's instead of failing silently.
 final class APIKeyPrompt: ObservableObject {
     static let shared = APIKeyPrompt()
-    /// Riot turned the key down. Stays up until a sync or a saved key clears
-    /// it, so the Matches banner can keep saying so.
+    /// Stays true until a sync or a saved key clears it, so the Matches banner keeps showing.
     @Published var riotKeyRejected = false {
         didSet { if riotKeyRejected && !oldValue { isPresented = true } }
     }
-    /// The key sheet opens by itself once per rejection. Every request after
-    /// that also gets a 401, and re-opening on each one buried the cached
-    /// games under the sheet; after Cancel the banner reopens it instead.
+    /// Opens once per rejection: every later request also 401s, and reopening on each buried the
+    /// cached games. After Cancel the banner reopens it.
     @Published var isPresented = false
 }

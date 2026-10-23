@@ -77,12 +77,19 @@ struct MatchDetailView: View {
             }
             .readableContentWidth()
         }
-        .background(Theme.background)
-        .navigationTitle(match.leagueStats?.champion ?? (match.tftStats != nil ? "Teamfight Tactics" : match.game.shortName))
-        .navigationBarTitleDisplayMode(.inline)
+        .screen(match.leagueStats?.champion ?? (match.tftStats != nil ? "Teamfight Tactics" : match.game.shortName))
         .navigationDestination(for: CoachRoute.self) { route in
             CoachChatView(match: route.match)
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(match.isSaved ? "Unsave game" : "Save game", systemImage: match.isSaved ? "bookmark.fill" : "bookmark") {
+                    match.isSaved.toggle()
+                }
+                .contentTransition(.symbolEffect(.replace))
+            }
+        }
+        .sensoryFeedback(.selection, trigger: match.isSaved)
     }
 
     /// On the header rather than at the foot of a long page, so the coach is
@@ -107,12 +114,8 @@ struct MatchDetailView: View {
                 .frame(maxWidth: .infinity, minHeight: headerMinHeight, alignment: .bottomLeading)
                 .background {
                     ZStack {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image.resizable().aspectRatio(contentMode: .fill)
-                            } else {
-                                Rectangle().fill(.secondary.opacity(0.2))
-                            }
+                        AsyncImage(url: url) { $0.resizable().aspectRatio(contentMode: .fill) } placeholder: {
+                            Rectangle().fill(.secondary.opacity(0.2))
                         }
 
                         // Scrim weighted to the lower half where the text sits,
@@ -161,20 +164,18 @@ struct MatchDetailView: View {
                     .font(.caption.bold())
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(.yellow.opacity(0.9))
+                    .background(.yellow.opacity(0.9), in: Capsule())
                     .foregroundStyle(.black)
-                    .clipShape(Capsule())
             }
         }
 
         let outcome = VStack(alignment: .leading, spacing: 10) {
             // Baseline-aligned beside the headline, and only wrapping onto a
             // second line once "VICTORY" alone fills the width.
-            if dynamicTypeSize.isAccessibilitySize {
-                FlowLayout(spacing: 12) { headline; badge }
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 12) { headline; badge }
-            }
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(FlowLayout(spacing: 12))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            layout { headline; badge }
 
             // One separator per line, per the metadata rule: queue and
             // duration ride together, the date stands alone.
@@ -226,8 +227,7 @@ struct MatchDetailView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background(PerformanceScore.color(for: score))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        .background(PerformanceScore.color(for: score), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                 .strokeBorder(.white.opacity(0.25), lineWidth: 1)
@@ -236,89 +236,85 @@ struct MatchDetailView: View {
     }
 
     private func leagueStatsSection(_ stats: LeagueStats) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionCard {
-                // KDA headline with the kill/death/assist split colour-coded
-                // and kill participation shown as a ring, rather than three
-                // more identical grey rows.
-                HStack(alignment: .center, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        KDAColumns(stats: stats)
-                        Text(stats.role)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        SectionCard {
+            // KDA headline with the kill/death/assist split colour-coded
+            // and kill participation shown as a ring, rather than three
+            // more identical grey rows.
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    KDAColumns(stats: stats)
+                    Text(stats.role)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                if let me = match.focusParticipant, let share = match.killShare(of: me) {
+                    participationRing(Int((share * 100).rounded()))
+                }
+            }
+
+            Divider()
+
+            // One neutral tile treatment instead of six different tints —
+            // the colours were decorative, not semantic, and made the card
+            // read as a sticker sheet.
+            LazyVGrid(columns: statTileColumns, spacing: 10) {
+                // Tints are semantic, not decorative: gold is gold, damage
+                // dealt is red, damage taken is a shield blue, healing is
+                // pink. Only the glyph is tinted — colouring the numbers too
+                // is what turned an earlier version of this card into a
+                // sticker sheet.
+                iconStat("Minions", "\(stats.creepScore)", icon: "leaf.fill", tint: .green)
+                iconStat("Gold", stats.goldEarned.formatted(), icon: "dollarsign.circle.fill", tint: .yellow)
+                iconStat("Vision", "\(stats.visionScore)", icon: "eye.fill", tint: .cyan)
+                iconStat("Dealt", stats.damageDealtToChampions.formatted(), icon: "burst.fill", tint: .red)
+                iconStat("Taken", stats.damageTaken.formatted(), icon: "shield.fill", tint: .blue)
+                iconStat("Healed", match.focusParticipant?.totalHeal.formatted() ?? "0", icon: "cross.case.fill", tint: .pink)
+            }
+
+            // Per-minute rates and standout moments, folded in here rather
+            // than repeated in a separate card.
+            let minutes = match.minutes
+            let rates = Group {
+                MiniStat(value: String(format: "%.0f", Double(stats.goldEarned) / minutes), label: "Gold/min", weight: .bold, spacing: 1)
+                MiniStat(value: String(format: "%.0f", Double(stats.damageDealtToChampions) / minutes), label: "Damage/min", weight: .bold, spacing: 1)
+                MiniStat(value: String(format: "%.1f", Double(stats.creepScore) / minutes), label: "Minions/min", weight: .bold, spacing: 1)
+                MiniStat(value: "\(stats.soloKills)", label: "1v1 kills", weight: .bold, spacing: 1)
+                MiniStat(value: "\(stats.largestKillingSpree)", label: "Kill streak", weight: .bold, spacing: 1)
+            }
+            // Five across, wrapping to a grid only when they no longer fit.
+            if dynamicTypeSize.isAccessibilitySize {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: rateStatMinWidth), spacing: 14)], spacing: 10) { rates }
+            } else {
+                HStack(spacing: 14) { rates }
+            }
+
+            if stats.firstBloodKill || stats.objectivesStolen > 0 {
+                HStack(spacing: 8) {
+                    if stats.firstBloodKill {
+                        highlightChip(text: "First Blood", icon: "drop.fill", tint: .red)
                     }
-
-                    Spacer()
-
-                    if let kp = killParticipation(for: stats) {
-                        participationRing(kp)
-                    }
-                }
-
-                Divider()
-
-                // One neutral tile treatment instead of six different tints —
-                // the colours were decorative, not semantic, and made the card
-                // read as a sticker sheet.
-                LazyVGrid(columns: statTileColumns, spacing: 10) {
-                    // Tints are semantic, not decorative: gold is gold, damage
-                    // dealt is red, damage taken is a shield blue, healing is
-                    // pink. Only the glyph is tinted — colouring the numbers too
-                    // is what turned an earlier version of this card into a
-                    // sticker sheet.
-                    iconStat("Minions", "\(stats.creepScore)", icon: "leaf.fill", tint: .green)
-                    iconStat("Gold", stats.goldEarned.formatted(), icon: "dollarsign.circle.fill", tint: .yellow)
-                    iconStat("Vision", "\(stats.visionScore)", icon: "eye.fill", tint: .cyan)
-                    iconStat("Dealt", stats.damageDealtToChampions.formatted(), icon: "burst.fill", tint: .red)
-                    iconStat("Taken", stats.damageTaken.formatted(), icon: "shield.fill", tint: .blue)
-                    iconStat("Healed", match.focusParticipant?.totalHeal.formatted() ?? "0", icon: "cross.case.fill", tint: .pink)
-                }
-
-                // Per-minute rates and standout moments, folded in here rather
-                // than repeated in a separate card.
-                let minutes = match.minutes
-                let rates = Group {
-                    rateStat("Gold/min", String(format: "%.0f", Double(stats.goldEarned) / minutes))
-                    rateStat("Damage/min", String(format: "%.0f", Double(stats.damageDealtToChampions) / minutes))
-                    rateStat("Minions/min", String(format: "%.1f", Double(stats.creepScore) / minutes))
-                    rateStat("1v1 kills", "\(stats.soloKills)")
-                    rateStat("Kill streak", "\(stats.largestKillingSpree)")
-                }
-                // Five across, wrapping to a grid only when they no longer fit.
-                if dynamicTypeSize.isAccessibilitySize {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: rateStatMinWidth), spacing: 14)], spacing: 10) { rates }
-                } else {
-                    HStack(spacing: 14) { rates }
-                }
-
-                if stats.firstBloodKill || stats.objectivesStolen > 0 {
-                    HStack(spacing: 8) {
-                        if stats.firstBloodKill {
-                            highlightChip(text: "First Blood", icon: "drop.fill", tint: .red)
-                        }
-                        if stats.objectivesStolen > 0 {
-                            highlightChip(text: "Stolen ×\(stats.objectivesStolen)", icon: "hand.raised.fill", tint: .purple)
-                        }
-                    }
-                }
-
-                let ownedItems = stats.items.filter { $0 != 0 }
-                if !ownedItems.isEmpty {
-                    Divider()
-                    Text("Items").font(.caption).foregroundStyle(.secondary)
-                    // Wraps once the scaled icons are wider than the card.
-                    let icons = ForEach(ownedItems, id: \.self) { item in
-                        ItemIconView(itemID: item, size: detailItemSize)
-                    }
-                    if dynamicTypeSize.isAccessibilitySize {
-                        FlowLayout(spacing: 6) { icons }
-                    } else {
-                        HStack(spacing: 6) { icons }
+                    if stats.objectivesStolen > 0 {
+                        highlightChip(text: "Stolen ×\(stats.objectivesStolen)", icon: "hand.raised.fill", tint: .purple)
                     }
                 }
             }
 
+            let ownedItems = stats.items.filter { $0 != 0 }
+            if !ownedItems.isEmpty {
+                Divider()
+                Text("Items").font(.caption).foregroundStyle(.secondary)
+                // Wraps once the scaled icons are wider than the card.
+                let icons = ForEach(ownedItems, id: \.self) { item in
+                    ItemIconView(itemID: item, size: detailItemSize)
+                }
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(FlowLayout(spacing: 6))
+                    : AnyLayout(HStackLayout(spacing: 6))
+                layout { icons }
+            }
         }
     }
 
@@ -330,14 +326,13 @@ struct MatchDetailView: View {
         .foregroundStyle(tint)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .background(tint.opacity(0.12))
-        .clipShape(Capsule())
+        .background(tint.opacity(0.12), in: Capsule())
     }
 
     private func tftStatsSection(_ stats: TFTStats) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Performance").font(.headline)
-            sectionCard {
+            SectionCard {
                 LabeledContent("Placement", value: "#\(stats.placement)")
                 Divider()
                 LabeledContent("Level", value: "\(stats.level)")
@@ -370,7 +365,7 @@ struct MatchDetailView: View {
         case .team:
             TeamComparisonView(match: match)
         case .matchup:
-            PlayerMatchupView(match: match, region: region)
+            PlayerMatchupView(match: match)
         case .you:
             if let stats = match.leagueStats { leagueStatsSection(stats) }
         }
@@ -455,7 +450,7 @@ struct MatchDetailView: View {
     private var reflectionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Reflection").font(.headline)
-            sectionCard {
+            SectionCard {
                 Text("What happened")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -470,20 +465,9 @@ struct MatchDetailView: View {
                     .foregroundStyle(.secondary)
                 // Tags are what make the journal queryable later — the notes
                 // say what happened, the tags are what Stats can group by.
-                TagEditor(tags: $match.tags, vocabulary: tagVocabulary)
+                TagEditor(tags: $match.tags, vocabulary: ReflectionTag.vocabulary(for: match.game, usedIn: allMatches))
             }
         }
-    }
-
-    private var tagVocabulary: [String] {
-        ReflectionTag.vocabulary(for: match.game, usedIn: allMatches)
-    }
-
-    private func killParticipation(for stats: LeagueStats) -> Int? {
-        guard let linkedTeamId = match.focusParticipant?.teamId else { return nil }
-        let teamKills = match.participants.filter { $0.teamId == linkedTeamId }.map(\.kills).reduce(0, +)
-        guard teamKills > 0 else { return nil }
-        return Int((Double(stats.kills + stats.assists) / Double(teamKills) * 100).rounded())
     }
 
     private func participationRing(_ percent: Int) -> some View {
@@ -507,19 +491,6 @@ struct MatchDetailView: View {
         .accessibilityLabel("Kill participation \(percent) percent")
     }
 
-    private func rateStat(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 1) {
-            Text(value)
-                .font(.caption.weight(.bold).monospacedDigit())
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .scaledFont(9)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     private func iconStat(_ label: String, _ value: String, icon: String, tint: Color) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
@@ -537,16 +508,7 @@ struct MatchDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
-        .background(Theme.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-    }
-
-    @ViewBuilder
-    private func sectionCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Theme.itemSpacing) {
-            content()
-        }
-        .cardSurface()
+        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 
     private var durationString: String {

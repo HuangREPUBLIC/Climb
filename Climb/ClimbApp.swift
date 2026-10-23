@@ -34,19 +34,8 @@ struct ClimbApp: App {
                 .tint(Theme.accent)
                 .preferredColorScheme(.light)
         }
-        .modelContainer(for: [
-            LinkedAccount.self,
-            Match.self,
-            LeagueStats.self,
-            TFTStats.self,
-            CoachConversation.self,
-            ChatMessage.self,
-            MatchParticipantSummary.self,
-            TeamStats.self,
-            OpponentEncounter.self,
-            GoldTimelinePoint.self,
-            SavedPlayer.self
-        ])
+        // Match's relationships bring in the other eight models.
+        .modelContainer(for: [LinkedAccount.self, Match.self, SavedPlayer.self])
     }
 }
 

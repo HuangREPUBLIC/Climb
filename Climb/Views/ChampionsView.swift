@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// The Champions tab (英雄): op.gg's tier list for one lane, each champion a
-/// tap away from its build, runes, skill order and matchups.
 struct ChampionsView: View {
     @AppStorage("championsPosition") private var position: OPGGPosition = .top
     @State private var meta: [OPGGPosition: [MetaChampion]] = [:]
@@ -42,13 +40,10 @@ struct ChampionsView: View {
             .padding()
             .readableContentWidth()
         }
-        .background(Theme.background)
-        .navigationTitle("Champions")
-        .navigationBarTitleDisplayMode(.inline)
+        .screen("Champions")
         .navigationDestination(for: ChampionRoute.self) { route in
             ChampionDetailView(champion: route.champion, position: route.position)
         }
-        // Fifty-odd champions a lane: scrolling for one was the only way.
         .searchable(text: $query, prompt: "Find a champion")
         .refreshable { await load() }
         .task(id: position) {
@@ -58,8 +53,7 @@ struct ChampionsView: View {
 
     private func tierList(_ champions: [MetaChampion]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The badges are op.gg's grades; the key sits where they're read,
-            // not in a footnote fifty rows down.
+            // The key to op.gg's grades sits where the badges are read, not in a footnote fifty rows down.
             Text("Tier: OP is the strongest right now, then T1 (strong) down to T5 (weak).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -101,7 +95,6 @@ struct ChampionsView: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 22, alignment: .trailing)
             ChampionIconView(championName: champion.champion, size: portraitSize)
-            // Tier under the name, so the name gets the row's spare width.
             VStack(alignment: .leading, spacing: 2) {
                 Text(champion.champion)
                     .font(.subheadline.weight(.medium))
@@ -120,8 +113,7 @@ struct ChampionsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Whole percents: op.gg rounds its rates to two decimals, so "51.0%"
-    /// would claim a precision the data doesn't have.
+    /// Whole percents: op.gg rounds its rates to two decimals, so "51.0%" would claim false precision.
     private func percent(_ value: Double) -> some View {
         Text(value.formatted(.percent.precision(.fractionLength(0))))
             .font(.caption.monospacedDigit())

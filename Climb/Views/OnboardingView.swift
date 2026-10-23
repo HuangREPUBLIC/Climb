@@ -1,13 +1,10 @@
 import SwiftUI
 import SwiftData
 
-/// The first screens a new player sees: what Climb does, then signing in
-/// with a Riot ID. ContentView shows this until an account is linked; after
-/// that the account sheet (LinkAccountView) handles syncing and switching.
+/// What Climb does, then Riot ID sign-in; ContentView shows this until an account is linked.
 struct OnboardingView: View {
-    /// Set from the first sync tap until a sync succeeds. The account row
-    /// is saved early in an import, and without this ContentView would swap
-    /// to the app mid-import — or behind a failure the player never saw.
+    /// Set from the first sync tap until a sync succeeds. The account row is saved early in an import,
+    /// so without this ContentView would swap to the app mid-import, or behind a failure the player never saw.
     @Binding var isLinking: Bool
 
     @Environment(\.modelContext) private var modelContext
@@ -97,43 +94,90 @@ struct OnboardingView: View {
     // MARK: - Pages
 
     private func introPage(_ intro: Intro) -> some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                hero(intro.icon)
-                    .padding(.top, 24)
-                VStack(spacing: 8) {
-                    // Two lines held on every page, so the card doesn't jump
-                    // when one title wraps and the next doesn't. The spare
-                    // line goes above a short title, not between it and its
-                    // subtitle.
-                    ZStack(alignment: .bottom) {
-                        Text(" \n ").hidden()
-                        Text(intro.title)
-                            .multilineTextAlignment(.center)
-                    }
-                    .font(.largeTitle.bold())
-                    Text(intro.message)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
+        page(intro.icon) {
+            VStack(spacing: 8) {
+                // Two lines held on every page so the card doesn't jump; a short title's spare line goes above it.
+                ZStack(alignment: .bottom) {
+                    Text(" \n ").hidden()
+                    Text(intro.title)
                         .multilineTextAlignment(.center)
                 }
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(intro.points, id: \.text) { point in
-                        HStack(spacing: 14) {
-                            Image(systemName: point.icon)
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(Theme.accent)
-                                .frame(width: pointIconSize, height: pointIconSize)
-                                .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                                .accessibilityHidden(true)
-                            Text(point.text)
-                                .font(.subheadline)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                .font(.largeTitle.bold())
+                Text(intro.message)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(intro.points, id: \.text) { point in
+                    HStack(spacing: 14) {
+                        Image(systemName: point.icon)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: pointIconSize, height: pointIconSize)
+                            .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                            .accessibilityHidden(true)
+                        Text(point.text)
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .cardSurface()
+            }
+            .cardSurface()
+        }
+    }
+
+    private var loginForm: some View {
+        page("person.crop.circle.badge.checkmark") {
+            VStack(spacing: 8) {
+                Text("Sign in with your Riot ID")
+                    .font(.title.bold())
+                    .multilineTextAlignment(.center)
+                Text("It's the name and tag at the top right of the League client, like Faker#KR1.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Riot ID")
+                    .font(.headline)
+                RiotIDInput(gameName: $gameName, tagLine: $tagLine, platform: $platform, focus: $focusedField, submitLabel: .go) {
+                    if canSync { sync() }
+                }
+            }
+            .cardSurface()
+
+            if let errorMessage { ErrorCard(message: errorMessage) }
+
+            VStack(spacing: 6) {
+                Text("Climb reads public match data through Riot's API. Nothing is posted to your account.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    showingKeys = true
+                } label: {
+                    Label("API Keys", systemImage: "key")
+                        .font(.caption.weight(.semibold))
+                }
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func page<Content: View>(_ icon: String, @ViewBuilder content: () -> Content) -> some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                Image(systemName: icon)
+                    .font(.system(size: heroSize * 0.42, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: heroSize, height: heroSize)
+                    .background(Theme.accentGradient, in: RoundedRectangle(cornerRadius: heroSize * 0.28, style: .continuous))
+                    .shadow(color: Theme.accent.opacity(0.35), radius: 18, y: 8)
+                    .accessibilityHidden(true)
+                    .padding(.top, 24)
+                content()
             }
             .padding(.horizontal, 24)
             .readableContentWidth(520)
@@ -141,62 +185,6 @@ struct OnboardingView: View {
         .scrollBounceBehavior(.basedOnSize)
         // Centred when it fits; pinned to the top it left half the screen empty.
         .defaultScrollAnchor(.center, for: .alignment)
-    }
-
-    private var loginForm: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                hero("person.crop.circle.badge.checkmark")
-                    .padding(.top, 24)
-                VStack(spacing: 8) {
-                    Text("Sign in with your Riot ID")
-                        .font(.title.bold())
-                        .multilineTextAlignment(.center)
-                    Text("It's the name and tag at the top right of the League client, like Faker#KR1.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Riot ID")
-                        .font(.headline)
-                    RiotIDInput(gameName: $gameName, tagLine: $tagLine, platform: $platform, focus: $focusedField, submitLabel: .go) {
-                        if canSync { sync() }
-                    }
-                }
-                .cardSurface()
-
-                if let errorMessage { ErrorCard(message: errorMessage) }
-
-                VStack(spacing: 6) {
-                    Text("Climb reads public match data through Riot's API. Nothing is posted to your account.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button {
-                        showingKeys = true
-                    } label: {
-                        Label("API Keys", systemImage: "key")
-                            .font(.caption.weight(.semibold))
-                    }
-                }
-            }
-            .padding(.horizontal, 24)
-            .readableContentWidth(520)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .scrollBounceBehavior(.basedOnSize)
-        .defaultScrollAnchor(.center, for: .alignment)
-    }
-
-    private func hero(_ icon: String) -> some View {
-        Image(systemName: icon)
-            .font(.system(size: heroSize * 0.42, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: heroSize, height: heroSize)
-            .background(Theme.accentGradient, in: RoundedRectangle(cornerRadius: heroSize * 0.28, style: .continuous))
-            .shadow(color: Theme.accent.opacity(0.35), radius: 18, y: 8)
-            .accessibilityHidden(true)
     }
 
     // MARK: - Chrome
@@ -215,18 +203,10 @@ struct OnboardingView: View {
 
     private var primaryButton: some View {
         let onLogin = page == loginPage
-        return VStack(spacing: 8) {
-            PrimaryButton(title: isWorking ? "Syncing…" : onLogin ? "Start syncing" : "Continue",
-                          isWorking: isWorking, isEnabled: !onLogin || canSync) {
-                if onLogin { sync() } else { page += 1 }
-            }
-
-            if isWorking {
-                Text("Importing your last 20 games. The first sync takes a moment.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
+        return PrimaryButton(title: isWorking ? "Syncing…" : onLogin ? "Start syncing" : "Continue",
+                             isWorking: isWorking, isEnabled: !onLogin || canSync,
+                             workingNote: "Importing your last 20 games. The first sync takes a moment.") {
+            if onLogin { sync() } else { page += 1 }
         }
         .padding(.horizontal, 24)
         .readableContentWidth(520)
@@ -262,7 +242,6 @@ struct OnboardingView: View {
                     context: modelContext
                 )
                 isWorking = false
-                // ContentView swaps to the app.
                 isLinking = false
             } catch {
                 isWorking = false

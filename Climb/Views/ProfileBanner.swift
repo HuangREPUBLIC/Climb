@@ -1,18 +1,12 @@
 import SwiftUI
 
-/// The header card of a profile — yours or another player's: portrait, name
-/// and rank on the left, the player's most-played champion on the right.
-///
-/// A card inset from the edges rather than splash art bled to the screen
-/// edge: splash art is landscape, and stretched over a tall header it cropped
-/// down to a stray elbow. The champion's portrait loading-screen art fits a
-/// card's side whole instead, fading into the white.
+/// Profile header card (yours or another player's): portrait, name, rank and the most-played champion's art.
+/// Uses portrait loading art, not splash: splash is landscape and crops to a stray elbow in a tall header.
 struct ProfileBanner<Content: View>: View {
     let profileIconID: Int?
     let level: Int?
     /// The player's games; the most played champion fronts the card.
     let matches: [Match]
-    /// Name, rank and anything else beside the portrait.
     @ViewBuilder let content: () -> Content
 
     @ScaledMetric(relativeTo: .title2) private var avatarSize: CGFloat = 60
@@ -25,8 +19,7 @@ struct ProfileBanner<Content: View>: View {
     }
 
     var body: some View {
-        // Portrait beside the name: stacked above it, the banner alone took
-        // half the first screen and the first match started below the fold.
+        // Portrait beside the name: stacked above it, the banner alone took half the first screen.
         HStack(alignment: .top, spacing: 0) {
             avatar
                 .padding(.trailing, 14)
@@ -53,16 +46,14 @@ struct ProfileBanner<Content: View>: View {
         .cardShadow()
     }
 
-    /// Head-and-shoulders of the portrait art, melting into the card on its
-    /// left and bottom edges so the text beside it stays on plain ground.
+    /// The art fades out on its left and bottom edges so the text beside it stays on plain ground.
     @ViewBuilder
     private var championArt: some View {
         if let name = mainChampion?.name, let url = DataDragonService.shared.loadingArtURL(for: name) {
             Color.clear
                 .frame(width: artWidth)
                 .overlay(alignment: .top) {
-                    // Oversized a little: loading art carries a dark frame
-                    // along its edges, pushed out past the clip here.
+                    // Oversized so loading art's dark edge frame falls outside the clip.
                     AsyncImage(url: url) { $0.resizable().aspectRatio(contentMode: .fill) } placeholder: { Color.clear }
                         .padding(-10)
                 }
@@ -91,7 +82,6 @@ struct ProfileBanner<Content: View>: View {
             }
         }
         .overlay(Circle().strokeBorder(Theme.accent, lineWidth: 2.5))
-        // Level rides on the portrait the way the game client draws it.
         .overlay(alignment: .bottom) {
             if let level {
                 Text("\(level)")
@@ -106,7 +96,6 @@ struct ProfileBanner<Content: View>: View {
     }
 }
 
-/// A Riot ID styled for the banner: the name large, the tag under it.
 struct BannerTitle: View {
     let text: String
 
@@ -138,9 +127,9 @@ struct RankChip: View {
         HStack(spacing: 6) {
             if let tier, let division {
                 RankIconView(tier: tier, size: iconSize)
-                Text(RankEmblemService.displayName(tier: tier, division: division))
+                // Apex tiers have no division.
+                Text(["MASTER", "GRANDMASTER", "CHALLENGER"].contains(tier.uppercased()) ? tier.capitalized : "\(tier.capitalized) \(division)")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.primary)
                 if let leaguePoints {
                     Text("\u{00B7} \(leaguePoints) LP")
                         .font(.caption.monospacedDigit())
@@ -152,7 +141,6 @@ struct RankChip: View {
                     .foregroundStyle(.secondary)
                 Text("Unranked")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
             }
         }
         .lineLimit(1)
@@ -163,11 +151,8 @@ struct RankChip: View {
     }
 }
 
-/// Three headline numbers, each with a plain-language line under it, since
-/// "1.32 KDA" means nothing to someone who doesn't play.
-///
-/// The columns become rows at accessibility sizes: a third of the width can't
-/// hold "Win rate" and its number without truncating.
+/// Three headline numbers, each with a plain-language caption ("1.32 KDA" means nothing to a non-player).
+/// Columns become rows at accessibility sizes: a third of the width truncates "Win rate" and its number.
 struct StatSummaryCard: View {
     struct Stat {
         let icon: String
@@ -175,9 +160,8 @@ struct StatSummaryCard: View {
         var tint: Color = .secondary
         let label: String
         let value: String
-        /// Colours the number with `tint` too, when the colour is the verdict.
         var tintsValue = false
-        var caption: String?
+        let caption: String
     }
 
     let stats: [Stat]
@@ -217,13 +201,11 @@ struct StatSummaryCard: View {
             Text(stat.label)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            if let caption = stat.caption {
-                Text(caption)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(stat.caption)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 4)
         .frame(maxWidth: .infinity)
@@ -231,9 +213,7 @@ struct StatSummaryCard: View {
     }
 }
 
-/// The headline numbers under a profile banner: win/loss as one horizontal
-/// card, then three tiles — KDA, average rating and the last ten results.
-/// TFT swaps in placements. `matches` is newest first.
+/// Win/loss card plus KDA, rating and last-ten tiles (TFT: placements); `matches` is newest first.
 struct ProfileStatsSection: View {
     let matches: [Match]
 
@@ -241,13 +221,11 @@ struct ProfileStatsSection: View {
 
     private var isTFT: Bool { matches.allSatisfy { $0.leagueStats == nil } }
 
-    /// Callers show it only when there are games: an empty list already says
-    /// why, and a card of zeros under it reads as broken.
+    /// Callers show it only when there are games: a card of zeros reads as broken.
     var body: some View {
         VStack(spacing: 10) {
             WinLossCard(matches: matches, isTFT: isTFT)
-            // Equal-height tiles: each fills the row, and the row is only
-            // as tall as its tallest tile.
+            // Equal-height tiles: each fills the row, which is only as tall as its tallest tile.
             let layout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(spacing: 10))
                 : AnyLayout(HStackLayout(spacing: 10))
@@ -277,7 +255,6 @@ struct ProfileStatsSection: View {
         }
     }
 
-    /// One decimal, per League game.
     private func average(_ key: KeyPath<LeagueStats, Int>) -> String {
         let lines = matches.compactMap(\.leagueStats)
         return String(format: "%.1f", Double(lines.map { $0[keyPath: key] }.reduce(0, +)) / Double(max(lines.count, 1)))
@@ -309,9 +286,7 @@ struct ProfileStatsSection: View {
     }
 }
 
-/// Your own Matches tab's one-line summary. The full breakdown is the Stats
-/// tab's job; repeating it here pushed the first match below the fold.
-/// `matches` is newest first.
+/// The Matches tab's one-line summary (the full breakdown is on Stats, not here); `matches` is newest first.
 struct ProfileSummaryStrip: View {
     let matches: [Match]
 
@@ -355,7 +330,6 @@ struct ProfileSummaryStrip: View {
     }
 }
 
-/// Win rate as a number and as a bar split between wins and losses.
 private struct WinLossCard: View {
     let matches: [Match]
     let isTFT: Bool
@@ -405,7 +379,6 @@ private struct WinLossCard: View {
     }
 }
 
-/// A small stat card: a label, a big value and a plain-language line.
 private struct StatTile<Value: View>: View {
     let title: String
     let icon: String

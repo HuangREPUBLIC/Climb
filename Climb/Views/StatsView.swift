@@ -2,26 +2,6 @@ import SwiftUI
 import SwiftData
 import Charts
 
-private struct KDAGamePoint: Identifiable {
-    let index: Int
-    let kda: Double
-    let win: Bool
-    var id: Int { index }
-}
-
-private struct RoleWinRate: Identifiable {
-    let role: String
-    let games: Int
-    let winRate: Double
-    var id: String { role }
-}
-
-private struct PlacementPoint: Identifiable {
-    let date: Date
-    let placement: Int
-    var id: Date { date }
-}
-
 private struct TagWinRate: Identifiable {
     let tag: String
     let games: Int
@@ -45,16 +25,6 @@ struct StatsView: View {
     private var gameMatches: [Match] { allMatches.filter { $0.game == selectedGame && $0.isOwnHistory } }
     /// ARAM and normals would otherwise blend into a ranked win rate.
     private var matches: [Match] { gameMatches.filter { match in queueFilter.map { match.queueType == $0 } ?? true } }
-    private var queues: [String] {
-        Dictionary(grouping: gameMatches, by: \.queueType)
-            .sorted { $0.value.count > $1.value.count }
-            .map(\.key)
-    }
-
-    /// Magnitude series use the app accent (not a screen-local teal) so Stats
-    /// belongs to the same product as everything else. Win rate stays
-    /// green/red because that's a threshold read, not a magnitude.
-    private let chartAccent = Theme.chart
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -113,6 +83,7 @@ struct StatsView: View {
                     .padding(.top, 8)
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isHeader)
+                    let queues = gameMatches.queuesByPlays
                     if queues.count > 1 {
                         TagFilterBar(tags: queues, selection: $queueFilter)
                     }
@@ -151,13 +122,7 @@ struct StatsView: View {
         }
         .navigationTitle("Stats")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if GameFilterPicker.isNeeded(selection: selectedGame, availableGames: Set(allMatches.map(\.game))) {
-                ToolbarItem(placement: .topBarLeading) {
-                    GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game)))
-                }
-            }
-        }
+        .toolbar { GameFilterPicker(selection: $selectedGame, availableGames: Set(allMatches.map(\.game))) }
         .onChange(of: selectedGame) { queueFilter = nil }
     }
 
@@ -171,10 +136,7 @@ struct StatsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.headline)
-            VStack(alignment: .leading, spacing: 10) {
-                content()
-            }
-            .cardSurface()
+            SectionCard(content: content)
             if let footnote {
                 Text(footnote)
                     .font(.caption)
@@ -192,8 +154,7 @@ struct StatsView: View {
         let top4 = placements.filter { $0 <= 4 }.count
         let average = placements.isEmpty ? 0 : Double(placements.reduce(0, +)) / Double(placements.count)
 
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("Teamfight Tactics").font(.headline)
+        return section("Teamfight Tactics") {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Top 4 rate").font(.caption).foregroundStyle(.secondary)
@@ -207,7 +168,6 @@ struct StatsView: View {
                         .font(.title3.weight(.semibold).monospacedDigit())
                 }
             }
-            .cardSurface()
         }
     }
 
@@ -216,18 +176,10 @@ struct StatsView: View {
     /// Groups the player's own tags against results. Needs at least two games
     /// on a tag: a 100% win rate off one game is noise, not a pattern.
     private var tagStats: [TagWinRate] {
-        var counts: [String: (games: Int, wins: Int)] = [:]
-        for match in matches {
-            for tag in match.tags {
-                var entry = counts[tag] ?? (games: 0, wins: 0)
-                entry.games += 1
-                if match.win { entry.wins += 1 }
-                counts[tag] = entry
-            }
-        }
-        return counts
-            .filter { $0.value.games >= 2 }
-            .map { TagWinRate(tag: $0.key, games: $0.value.games, wins: $0.value.wins) }
+        let tagged = matches.flatMap { match in match.tags.map { (tag: $0, win: match.win) } }
+        return Dictionary(grouping: tagged, by: \.tag)
+            .filter { $0.value.count >= 2 }
+            .map { TagWinRate(tag: $0.key, games: $0.value.count, wins: $0.value.filter(\.win).count) }
             .sorted { $0.games == $1.games ? $0.tag < $1.tag : $0.games > $1.games }
     }
 
@@ -322,28 +274,24 @@ struct StatsView: View {
     @ViewBuilder
     private var kdaChart: some View {
         let recent = Array(leagueMatches.suffix(20))
-        let points = recent.enumerated().compactMap { index, match -> KDAGamePoint? in
-            guard let stats = match.leagueStats else { return nil }
-            return KDAGamePoint(index: index + 1, kda: stats.kda, win: match.win)
-        }
         // Totals over totals, like every other KDA here. The mean of per-game
         // ratios read 1.8 over a tile saying 1.37: one deathless game inflates it.
         let average = FriendComparisonService.aggregate(recent).kda
 
-        Text("Last \(points.count) games · KDA \(String(format: "%.2f", average))")
+        Text("Last \(recent.count) games · KDA \(String(format: "%.2f", average))")
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
 
         Chart {
-            ForEach(points) { point in
+            ForEach(Array(recent.enumerated()), id: \.offset) { index, match in
                 // A 0-KDA game still gets a visible stub: a missing bar
                 // reads as a missing game, not a bad one.
                 BarMark(
-                    x: .value("Game", point.index),
-                    y: .value("KDA", max(point.kda, 0.08)),
+                    x: .value("Game", index + 1),
+                    y: .value("KDA", max(match.leagueStats?.kda ?? 0, 0.08)),
                     width: .fixed(9)
                 )
-                .foregroundStyle(point.win ? Theme.win.gradient : Theme.loss.gradient)
+                .foregroundStyle(match.win ? Theme.win.gradient : Theme.loss.gradient)
                 .cornerRadius(3)
             }
             RuleMark(y: .value("Average", average))
@@ -354,12 +302,7 @@ struct StatsView: View {
                 }
         }
         .chartXAxis(.hidden)
-        .chartYAxis {
-            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine().foregroundStyle(.quaternary)
-                AxisValueLabel()
-            }
-        }
+        .chartYAxis { gridAxisMarks(.automatic(desiredCount: 4)) }
         .frame(height: chartHeight)
 
         // One row with the caption pushed right, until the text is large enough
@@ -383,14 +326,14 @@ struct StatsView: View {
     @ViewBuilder
     private var roleChart: some View {
         let grouped = Dictionary(grouping: leagueMatches) { $0.leagueStats?.role ?? "—" }
-        let stats = grouped.map { role, matches -> RoleWinRate in
+        let stats = grouped.map { role, matches in
             let wins = matches.filter(\.win).count
             let rate = matches.isEmpty ? 0 : Double(wins) / Double(matches.count) * 100
-            return RoleWinRate(role: role, games: matches.count, winRate: rate)
+            return (role: role, games: matches.count, winRate: rate)
         }.sorted { $0.games > $1.games }
 
         Chart {
-            ForEach(stats) { entry in
+            ForEach(stats, id: \.role) { entry in
                 // The game count rides on the label, so one lucky game can't
                 // pass for a 100% role, and 0% reads as 0% rather than no bar.
                 BarMark(x: .value("Role", "\(entry.role) (\(entry.games))"), y: .value("Win rate", entry.winRate))
@@ -407,34 +350,26 @@ struct StatsView: View {
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
         }
         .chartYScale(domain: 0...100)
-        .chartYAxis {
-            AxisMarks { _ in
-                AxisGridLine().foregroundStyle(.quaternary)
-                AxisValueLabel()
-            }
-        }
+        .chartYAxis { gridAxisMarks() }
         .frame(height: tallChartHeight)
     }
 
     @ViewBuilder
     private var placementChart: some View {
-        let points = tftMatches.compactMap { match -> PlacementPoint? in
-            guard let stats = match.tftStats else { return nil }
-            return PlacementPoint(date: match.timestamp, placement: stats.placement)
-        }
+        let points = tftMatches.compactMap { match in match.tftStats.map { (date: match.timestamp, placement: $0.placement) } }
 
         Text("Lower is better")
             .font(.caption)
             .foregroundStyle(.secondary)
 
         Chart {
-            ForEach(points) { point in
+            ForEach(points, id: \.date) { point in
                 LineMark(x: .value("Date", point.date), y: .value("Placement", point.placement))
-                    .foregroundStyle(chartAccent)
+                    .foregroundStyle(Theme.accent)
                     .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
                     .interpolationMethod(.catmullRom)
                 PointMark(x: .value("Date", point.date), y: .value("Placement", point.placement))
-                    .foregroundStyle(chartAccent)
+                    .foregroundStyle(Theme.accent)
                     .symbolSize(20)
             }
             RuleMark(y: .value("Top 4", 4))
@@ -442,18 +377,17 @@ struct StatsView: View {
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
         }
         .chartYScale(domain: [8, 1])
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine().foregroundStyle(.quaternary)
-                AxisValueLabel()
-            }
-        }
-        .chartYAxis {
-            AxisMarks { _ in
-                AxisGridLine().foregroundStyle(.quaternary)
-                AxisValueLabel()
-            }
-        }
+        .chartXAxis { gridAxisMarks(.automatic(desiredCount: 4)) }
+        .chartYAxis { gridAxisMarks() }
         .frame(height: tallChartHeight)
+    }
+}
+
+/// Faint grid lines with the default value labels — the one axis style the
+/// Stats and Team charts share.
+func gridAxisMarks(_ values: AxisMarkValues = .automatic) -> some AxisContent {
+    AxisMarks(values: values) { _ in
+        AxisGridLine().foregroundStyle(.quaternary)
+        AxisValueLabel()
     }
 }

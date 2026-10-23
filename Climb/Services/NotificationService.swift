@@ -3,16 +3,9 @@ import Foundation
 import UserNotifications
 
 enum NotificationService {
-    /// Key the tapped-notification route reads the match id back out of.
     static let matchIDKey = "matchID"
 
-    static func requestAuthorizationIfNeeded() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
-    }
-
-    /// Called after a sync completes. Prompts the player to reflect shortly
-    /// after new matches are detected, per the proposal's "Reflection
-    /// reminders" feature.
+    /// Called after a sync: reminds the player to reflect shortly after new matches arrive.
     static func scheduleReflectionReminder(
         newMatchCount: Int,
         matchID: String? = nil,
@@ -20,16 +13,13 @@ enum NotificationService {
     ) {
         guard newMatchCount > 0 else { return }
 
-        // Asked here, in context, rather than at app launch: this is the first
-        // moment the player has actually done something a reminder would be
-        // about, so the system prompt lands next to a reason instead of a cold
-        // "Climb Would Like to Send You Notifications" on first open.
-        requestAuthorizationIfNeeded()
+        // Asked in context, not at launch, so the system prompt lands next to a reason rather
+        // than as a cold "Climb Would Like to Send You Notifications".
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
 
         let content = UNMutableNotificationContent()
         content.title = newMatchCount == 1 ? "Match imported" : "\(newMatchCount) matches imported"
-        // Naming the champion makes the reminder about a game the player
-        // remembers, rather than about the app having done some work.
+        // Naming the champion ties the reminder to a game the player remembers.
         if newMatchCount == 1, let championName {
             content.body = "How did the \(championName) game go? Add a note while it's fresh."
         } else if newMatchCount == 1 {
@@ -49,17 +39,11 @@ enum NotificationService {
     }
 }
 
-/// Routes a tapped notification to the match it was about.
-///
-/// Without this a tap just reopens the app on whatever tab it was last on, and
-/// the player still has to go and find the game the reminder meant — which is
-/// most of the work the reminder was supposed to save.
+/// Routes a tapped notification to the match it was about, instead of reopening on the last tab.
 final class NotificationRouter: NSObject, ObservableObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = NotificationRouter()
 
-    /// Held as state rather than delivered as an event: a cold launch from a
-    /// notification runs this delegate before any view exists to receive it, so
-    /// the id has to wait somewhere until the UI is ready to consume it.
+    /// State, not an event: a cold launch runs the delegate before any view exists to consume it.
     @Published var pendingMatchID: String?
 
     func start() {
@@ -78,8 +62,7 @@ final class NotificationRouter: NSObject, ObservableObject, UNUserNotificationCe
         }
     }
 
-    /// Reminders are worth showing while the app is open too — the player is
-    /// usually looking at a different screen entirely when one fires.
+    /// Shown while the app is open too: the player is usually on another screen when one fires.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,

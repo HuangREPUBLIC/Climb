@@ -12,14 +12,6 @@ struct TeamComparisonView: View {
         case tanking = "Tanking"
         case gold = "Gold"
         var id: String { rawValue }
-
-        var label: String {
-            switch self {
-            case .damage: return "Damage"
-            case .tanking: return "Tanking"
-            case .gold: return "Gold"
-            }
-        }
     }
 
     @State private var rankMetric: RankMetric = .damage
@@ -58,7 +50,7 @@ struct TeamComparisonView: View {
     private var goldDifferenceCard: some View {
         let last = match.goldTimeline.max { $0.minute < $1.minute }
 
-        return sectionCard {
+        return SectionCard {
             HStack {
                 Text("Gold difference").font(.headline)
                 Spacer()
@@ -82,7 +74,7 @@ struct TeamComparisonView: View {
     /// (how the two teams compared), so splitting them into separate floating
     /// panels just added visual noise.
     private var overviewCard: some View {
-        sectionCard {
+        SectionCard {
             if allyObjectives != nil || enemyObjectives != nil {
                 objectivesGrid
                 Divider().padding(.vertical, 4)
@@ -110,23 +102,26 @@ struct TeamComparisonView: View {
             }
             .frame(maxWidth: .infinity)
             LazyVGrid(columns: columns, spacing: 14) {
-                objectiveTile(url: ObjectiveIconService.baronURL, label: "Baron", ally: ally?.baronKills ?? 0, enemy: enemy?.baronKills ?? 0)
+                objectiveTile(url: ObjectiveIconService.url(named: "baron"), label: "Baron", ally: ally?.baronKills ?? 0, enemy: enemy?.baronKills ?? 0)
                 objectiveTile(url: ObjectiveIconService.url(named: "dragon"), label: "Dragon", ally: ally?.dragonKills ?? 0, enemy: enemy?.dragonKills ?? 0)
-                objectiveTile(url: ObjectiveIconService.heraldURL, label: "Herald", ally: ally?.heraldKills ?? 0, enemy: enemy?.heraldKills ?? 0)
+                objectiveTile(url: ObjectiveIconService.url(named: "riftherald"), label: "Herald", ally: ally?.heraldKills ?? 0, enemy: enemy?.heraldKills ?? 0)
                 // Voidgrubs only exist on matches played since 2024; the tile
                 // is hidden rather than showing a permanent 0/0 on older games.
                 if (ally?.voidgrubKills ?? 0) + (enemy?.voidgrubKills ?? 0) > 0 {
-                    objectiveTile(url: ObjectiveIconService.voidgrubURL, label: "Voidgrubs", ally: ally?.voidgrubKills ?? 0, enemy: enemy?.voidgrubKills ?? 0)
+                    objectiveTile(url: ObjectiveIconService.url(named: "grub"), label: "Voidgrubs", ally: ally?.voidgrubKills ?? 0, enemy: enemy?.voidgrubKills ?? 0)
                 }
-                objectiveTile(url: ObjectiveIconService.turretURL, label: "Towers", ally: ally?.towerKills ?? 0, enemy: enemy?.towerKills ?? 0)
-                objectiveTile(url: ObjectiveIconService.inhibitorURL, label: "Inhibitors", ally: ally?.inhibitorKills ?? 0, enemy: enemy?.inhibitorKills ?? 0)
+                objectiveTile(url: ObjectiveIconService.url(named: "tower"), label: "Towers", ally: ally?.towerKills ?? 0, enemy: enemy?.towerKills ?? 0)
+                objectiveTile(url: ObjectiveIconService.url(named: "inhibitor"), label: "Inhibitors", ally: ally?.inhibitorKills ?? 0, enemy: enemy?.inhibitorKills ?? 0)
             }
         }
     }
 
     private func objectiveTile(url: URL?, label: String, ally: Int, enemy: Int) -> some View {
         VStack(spacing: 6) {
-            ObjectiveIconView(url: url, size: objectiveIconSize)
+            AsyncImage(url: url) { $0.resizable().scaledToFit() } placeholder: {
+                Circle().fill(.secondary.opacity(0.15))
+            }
+            .frame(width: objectiveIconSize, height: objectiveIconSize)
             HStack(spacing: 4) {
                 Text("\(ally)").font(.subheadline.bold().monospacedDigit()).foregroundStyle(.blue)
                 Text("/").font(.caption).foregroundStyle(.secondary)
@@ -195,12 +190,12 @@ struct TeamComparisonView: View {
         VStack(alignment: .leading, spacing: 10) {
             Picker("Rank by", selection: $rankMetric) {
                 ForEach(RankMetric.allCases) { metric in
-                    Text(metric.label).tag(metric)
+                    Text(metric.rawValue).tag(metric)
                 }
             }
             .pickerStyle(.segmented)
 
-            sectionCard {
+            SectionCard {
                 let ranked = rankedParticipants
                 let total = max(ranked.map(metricValue).reduce(0, +), 1)
 
@@ -264,8 +259,8 @@ struct TeamComparisonView: View {
             }
             .padding(.bottom, 9)
 
-            Text(participant.isLinkedPlayer ? "\(participant.riotIdGameName) (You)" : participant.riotIdGameName)
-                .scaledFont(10, weight: participant.isLinkedPlayer ? .bold : .medium)
+            Text(participant.isYou ? "\(participant.riotIdGameName) (You)" : participant.riotIdGameName)
+                .scaledFont(10, weight: participant.isYou ? .bold : .medium)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
 
@@ -303,8 +298,8 @@ struct TeamComparisonView: View {
                 .frame(width: medalWidth)
             ChampionIconView(championName: participant.champion, size: rowPortraitSize)
             VStack(alignment: .leading, spacing: 1) {
-                Text(participant.isLinkedPlayer ? "\(participant.riotIdGameName) (You)" : participant.riotIdGameName)
-                    .font(.caption.weight(participant.isLinkedPlayer ? .bold : .regular))
+                Text(participant.isYou ? "\(participant.riotIdGameName) (You)" : participant.riotIdGameName)
+                    .font(.caption.weight(participant.isYou ? .bold : .regular))
                     .lineLimit(1)
                 Text(participant.teamId == linkedTeamId ? "Ally" : "Enemy")
                     .font(.caption2)
@@ -323,24 +318,11 @@ struct TeamComparisonView: View {
 
     @ViewBuilder
     private func medal(for rank: Int) -> some View {
-        switch rank {
-        case 1:
-            Image(systemName: "1.circle.fill").foregroundStyle(.yellow)
-        case 2:
-            Image(systemName: "2.circle.fill").foregroundStyle(.gray)
-        case 3:
-            Image(systemName: "3.circle.fill").foregroundStyle(.brown)
-        default:
+        if rank <= 3 {
+            Image(systemName: "\(rank).circle.fill").foregroundStyle([Color.yellow, .gray, .brown][rank - 1])
+        } else {
             Text("\(rank)").font(.caption).foregroundStyle(.secondary)
         }
-    }
-
-    @ViewBuilder
-    private func sectionCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            content()
-        }
-        .cardSurface()
     }
 }
 
@@ -392,11 +374,6 @@ struct GoldLeadChart: View {
                 }
             }
         }
-        .chartYAxis {
-            AxisMarks(values: .automatic(desiredCount: 3)) { _ in
-                AxisGridLine().foregroundStyle(.quaternary)
-                AxisValueLabel()
-            }
-        }
+        .chartYAxis { gridAxisMarks(.automatic(desiredCount: 3)) }
     }
 }

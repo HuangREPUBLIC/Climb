@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// An item's name, cost and effect — the bubble shown wherever an item is
-/// tapped, so inspecting one is the same everywhere in the app.
+/// An item's name, cost and effect: the bubble shown wherever an item is tapped.
 struct ItemDetailView: View {
     let itemID: Int
 
@@ -39,8 +38,7 @@ struct ItemDetailView: View {
 }
 
 extension View {
-    /// `ItemDetailView` as a popover anchored to this view — a bubble on
-    /// iPhone too, rather than the sheet a popover turns into by default.
+    /// `ItemDetailView` as a popover on this view; stays a bubble on iPhone instead of adapting to a sheet.
     func itemPopover(_ itemID: Int, isPresented: Binding<Bool>) -> some View {
         popover(isPresented: isPresented) {
             ItemDetailView(itemID: itemID)

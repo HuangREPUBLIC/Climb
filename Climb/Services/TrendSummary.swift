@@ -1,14 +1,11 @@
 import Foundation
 
-/// Recurring patterns across the player's recent League games — computed
-/// here, deterministically, so the numbers on screen are exact and the AI
-/// only has to explain them rather than invent them.
+/// Recurring patterns in recent League games, computed here so the AI only explains exact numbers.
 struct TrendSummary {
     /// Fewer games than this and a "pattern" is one bad night.
     static let minimumGames = 5
 
-    /// One comparison the card draws as two bars: "Deaths per game — you
-    /// 7.1, lobby 5.4".
+    /// One comparison the card draws as two bars, e.g. "Deaths per game: you 7.1, lobby 5.4".
     struct Signal: Identifiable {
         let label: String
         let mine: Double
@@ -17,19 +14,16 @@ struct TrendSummary {
         /// What `mine` is measured against: "Lobby", "Opponent".
         let theirsLabel: String
         var digits = 1
-        /// True when the player is clearly worse than the baseline.
         let isWeakness: Bool
         var id: String { label }
 
         var yours: String { String(format: "%.\(digits)f", mine) }
-        /// Worded for the prompt: "lobby 5.4".
         var baseline: String { "\(theirsLabel.lowercased()) \(String(format: "%.\(digits)f", theirs))" }
     }
 
     let games: Int
     let wins: Int
     let signals: [Signal]
-    /// Plain-text facts for the model, signals included.
     let promptLines: [String]
 
     /// Newest game first; only games with a full scoreboard count.
@@ -44,14 +38,12 @@ struct TrendSummary {
         var signals: [Signal] = []
         var lines: [String] = []
 
-        // Deaths against everyone else in the same lobbies.
         let myDeaths = average(games.compactMap { $0.focusParticipant.map { Double($0.deaths) } })
         let lobbyDeaths = average(games.flatMap { match in
             match.participants.filter { $0.puuid != match.focusParticipant?.puuid }.map { Double($0.deaths) }
         })
         signals.append(Signal(label: "Deaths per game", mine: myDeaths, theirs: lobbyDeaths, theirsLabel: "Lobby", isWeakness: lobbyDeaths > 0 && myDeaths > lobbyDeaths * 1.2))
 
-        // Farming against the lane opponent, the only fair comparison.
         var myCS: [Double] = [], theirCS: [Double] = []
         var laneKills = 0, laneDeaths = 0
         var matchups: [String: (games: Int, wins: Int)] = [:]
@@ -101,9 +93,8 @@ struct TrendSummary {
             lines.append("\(signal.label): \(signal.yours) (\(signal.baseline))\(signal.isWeakness ? " — a weakness" : "").")
         }
         let kp = average(games.compactMap { match -> Double? in
-            guard let me = match.focusParticipant else { return nil }
-            let teamKills = match.participants.filter { $0.teamId == me.teamId }.map(\.kills).reduce(0, +)
-            return teamKills > 0 ? Double(me.kills + me.assists) / Double(teamKills) * 100 : nil
+            guard let me = match.focusParticipant, let share = match.killShare(of: me) else { return nil }
+            return share * 100
         })
         lines.append("Average kill participation \(Int(kp.rounded()))%.")
 

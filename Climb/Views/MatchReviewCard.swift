@@ -152,15 +152,11 @@ private struct ReviewCharts: View {
         func average(_ value: (MatchParticipantSummary) -> Double) -> Double {
             others.isEmpty ? 0 : others.map(value).reduce(0, +) / Double(others.count)
         }
-        func killShare(_ player: MatchParticipantSummary) -> Double {
-            let teamKills = match.participants.filter { $0.teamId == player.teamId }.map(\.kills).reduce(0, +)
-            return teamKills > 0 ? Double(player.kills + player.assists) / Double(teamKills) : 0
-        }
         func perMinute(_ key: KeyPath<MatchParticipantSummary, Int>) -> (MatchParticipantSummary) -> Double {
             { Double($0[keyPath: key]) / match.minutes }
         }
         let axes: [(String, (MatchParticipantSummary) -> Double)] = [
-            ("Teamfights", killShare),
+            ("Teamfights", { match.killShare(of: $0) ?? 0 }),
             ("Damage", perMinute(\.damageDealtToChampions)),
             ("Gold", perMinute(\.goldEarned)),
             ("Minions", perMinute(\.creepScore)),

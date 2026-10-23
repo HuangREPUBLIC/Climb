@@ -47,72 +47,37 @@ final class LeagueStats {
 
     var match: Match?
 
-    init(
-        champion: String,
-        role: String,
-        kills: Int,
-        deaths: Int,
-        assists: Int,
-        creepScore: Int,
-        items: [Int] = [],
-        summonerSpellIDs: [Int] = [],
-        goldEarned: Int = 0,
-        damageDealtToChampions: Int = 0,
-        damageTaken: Int = 0,
-        visionScore: Int = 0,
-        wardsPlaced: Int = 0,
-        keystoneID: Int = 0,
-        primaryStyleID: Int = 0,
-        subStyleID: Int = 0,
-        doubleKills: Int = 0,
-        tripleKills: Int = 0,
-        quadraKills: Int = 0,
-        pentaKills: Int = 0,
-        turretKills: Int = 0,
-        inhibitorKills: Int = 0,
-        dragonKills: Int = 0,
-        dragonKillsByType: [String: Int] = [:],
-        baronKills: Int = 0,
-        objectivesStolen: Int = 0,
-        riftHeraldKills: Int = 0,
-        voidgrubKills: Int = 0,
-        firstBloodKill: Bool = false,
-        largestKillingSpree: Int = 0,
-        wardsKilled: Int = 0,
-        soloKills: Int = 0
-    ) {
-        self.champion = champion
+    /// The timeline-only fields (drakes by type, Herald, Voidgrubs, solo kills)
+    /// keep their defaults here; `MatchImportService.importHeadToHead` fills them.
+    init(_ p: RiotMatchResponse.Participant, role: String) {
+        champion = p.championName
         self.role = role
-        self.kills = kills
-        self.deaths = deaths
-        self.assists = assists
-        self.creepScore = creepScore
-        self.items = items
-        self.summonerSpellIDs = summonerSpellIDs
-        self.goldEarned = goldEarned
-        self.damageDealtToChampions = damageDealtToChampions
-        self.damageTaken = damageTaken
-        self.visionScore = visionScore
-        self.wardsPlaced = wardsPlaced
-        self.keystoneID = keystoneID
-        self.primaryStyleID = primaryStyleID
-        self.subStyleID = subStyleID
-        self.doubleKills = doubleKills
-        self.tripleKills = tripleKills
-        self.quadraKills = quadraKills
-        self.pentaKills = pentaKills
-        self.turretKills = turretKills
-        self.inhibitorKills = inhibitorKills
-        self.dragonKills = dragonKills
-        self.dragonKillsByType = dragonKillsByType
-        self.baronKills = baronKills
-        self.objectivesStolen = objectivesStolen
-        self.riftHeraldKills = riftHeraldKills
-        self.voidgrubKills = voidgrubKills
-        self.firstBloodKill = firstBloodKill
-        self.largestKillingSpree = largestKillingSpree
-        self.wardsKilled = wardsKilled
-        self.soloKills = soloKills
+        kills = p.kills
+        deaths = p.deaths
+        assists = p.assists
+        creepScore = p.totalMinionsKilled + p.neutralMinionsKilled
+        items = p.items
+        summonerSpellIDs = [p.summoner1Id, p.summoner2Id]
+        goldEarned = p.goldEarned
+        damageDealtToChampions = p.totalDamageDealtToChampions
+        damageTaken = p.totalDamageTaken
+        visionScore = p.visionScore
+        wardsPlaced = p.wardsPlaced
+        keystoneID = p.perks.keystoneID
+        primaryStyleID = p.perks.primaryStyleID
+        subStyleID = p.perks.subStyleID
+        doubleKills = p.doubleKills
+        tripleKills = p.tripleKills
+        quadraKills = p.quadraKills
+        pentaKills = p.pentaKills
+        turretKills = p.turretKills ?? 0
+        inhibitorKills = p.inhibitorKills ?? 0
+        dragonKills = p.dragonKills ?? 0
+        baronKills = p.baronKills ?? 0
+        objectivesStolen = p.objectivesStolen ?? 0
+        firstBloodKill = p.firstBloodKill ?? false
+        largestKillingSpree = p.largestKillingSpree ?? 0
+        wardsKilled = p.wardsKilled ?? 0
     }
 
     var kda: Double {

@@ -1,8 +1,8 @@
 import Foundation
 import SwiftData
 
-/// A player starred from their profile, listed on the Search tab so a friend
-/// is one tap away instead of a Riot ID to retype.
+/// A player followed from their profile, listed under Following on the
+/// Search tab so they're one tap away instead of a Riot ID to retype.
 @Model
 final class SavedPlayer {
     /// "name#tag", lowercased — Riot IDs are case-insensitive.

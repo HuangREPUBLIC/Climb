@@ -3,8 +3,6 @@ import Foundation
 actor RiotAPIClient {
     static let shared = RiotAPIClient()
 
-    private let session = URLSession.shared
-
     func resolvePUUID(gameName: String, tagLine: String, region: RiotRegion) async throws -> String {
         guard
             let encodedName = gameName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
@@ -19,59 +17,47 @@ actor RiotAPIClient {
 
     /// Riot caps `count` at 100 (it 400s on anything larger).
     func fetchRecentMatchIDs(puuid: String, region: RiotRegion, start: Int = 0, count: Int = 20) async throws -> [String] {
-        guard let url = URL(string: "https://\(region.rawValue).api.riotgames.com/lol/match/v5/matches/by-puuid/\(puuid)/ids?start=\(start)&count=\(min(count, 100))") else {
-            throw RiotAPIError.unexpectedStatus(0)
-        }
-        return try await get(url)
+        try await get(url(region.rawValue, "/lol/match/v5/matches/by-puuid/\(puuid)/ids?start=\(start)&count=\(min(count, 100))"))
     }
 
     func fetchMatch(matchID: String, region: RiotRegion) async throws -> RiotMatchResponse {
-        guard let url = URL(string: "https://\(region.rawValue).api.riotgames.com/lol/match/v5/matches/\(matchID)") else {
-            throw RiotAPIError.unexpectedStatus(0)
-        }
-        return try await get(url)
+        try await get(url(region.rawValue, "/lol/match/v5/matches/\(matchID)"))
     }
 
     func fetchMatchTimeline(matchID: String, region: RiotRegion) async throws -> RiotMatchTimelineResponse {
-        guard let url = URL(string: "https://\(region.rawValue).api.riotgames.com/lol/match/v5/matches/\(matchID)/timeline") else {
-            throw RiotAPIError.unexpectedStatus(0)
-        }
-        return try await get(url)
+        try await get(url(region.rawValue, "/lol/match/v5/matches/\(matchID)/timeline"))
     }
 
     func fetchSummoner(puuid: String, platform: RiotPlatform) async throws -> RiotSummonerResponse {
-        guard let url = URL(string: "https://\(platform.rawValue).api.riotgames.com/lol/summoner/v4/summoners/by-puuid/\(puuid)") else {
-            throw RiotAPIError.unexpectedStatus(0)
-        }
-        return try await get(url)
+        try await get(url(platform.rawValue, "/lol/summoner/v4/summoners/by-puuid/\(puuid)"))
     }
 
     func fetchLeagueEntries(puuid: String, platform: RiotPlatform) async throws -> [RiotLeagueEntry] {
-        guard let url = URL(string: "https://\(platform.rawValue).api.riotgames.com/lol/league/v4/entries/by-puuid/\(puuid)") else {
-            throw RiotAPIError.unexpectedStatus(0)
-        }
-        return try await get(url)
+        try await get(url(platform.rawValue, "/lol/league/v4/entries/by-puuid/\(puuid)"))
+    }
+
+    /// Another player's current solo rank, looked up on demand — not stored:
+    /// rank is always-current, not a property of a historical match. Nil when
+    /// unranked or when the lookup failed.
+    func soloRank(puuid: String, platform: RiotPlatform) async -> RiotLeagueEntry? {
+        try? await fetchLeagueEntries(puuid: puuid, platform: platform).first { $0.queueType == "RANKED_SOLO_5x5" }
     }
 
     func fetchRecentTFTMatchIDs(puuid: String, region: RiotRegion, count: Int = 20) async throws -> [String] {
-        guard let url = URL(string: "https://\(region.rawValue).api.riotgames.com/tft/match/v1/matches/by-puuid/\(puuid)/ids?count=\(count)") else {
-            throw RiotAPIError.unexpectedStatus(0)
-        }
-        return try await get(url)
+        try await get(url(region.rawValue, "/tft/match/v1/matches/by-puuid/\(puuid)/ids?count=\(count)"))
     }
 
     func fetchTFTMatch(matchID: String, region: RiotRegion) async throws -> RiotTFTMatchResponse {
-        guard let url = URL(string: "https://\(region.rawValue).api.riotgames.com/tft/match/v1/matches/\(matchID)") else {
-            throw RiotAPIError.unexpectedStatus(0)
-        }
-        return try await get(url, decoder: Self.snakeCaseDecoder)
+        try await get(url(region.rawValue, "/tft/match/v1/matches/\(matchID)"), decoder: .snakeCase)
     }
 
-    private static let snakeCaseDecoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return decoder
-    }()
+    /// `host` is a regional (`asia`) or platform (`jp1`) routing value.
+    private func url(_ host: String, _ path: String) throws -> URL {
+        guard let url = URL(string: "https://\(host).api.riotgames.com\(path)") else {
+            throw RiotAPIError.unexpectedStatus(0)
+        }
+        return url
+    }
 
     private func get<T: Decodable>(_ url: URL, decoder: JSONDecoder = JSONDecoder()) async throws -> T {
         var request = URLRequest(url: url)
@@ -80,7 +66,7 @@ actor RiotAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await URLSession.shared.data(for: request)
         } catch {
             throw RiotAPIError.network(error)
         }
@@ -115,4 +101,13 @@ actor RiotAPIClient {
             throw RiotAPIError.decoding(error)
         }
     }
+}
+
+extension JSONDecoder {
+    /// TFT-Match-V1 and op.gg both answer in snake_case.
+    nonisolated static let snakeCase: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return decoder
+    }()
 }

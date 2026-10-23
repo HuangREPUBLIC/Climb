@@ -44,69 +44,37 @@ final class MatchParticipantSummary {
 
     var match: Match?
 
-    init(
-        puuid: String,
-        riotIdGameName: String,
-        riotIdTagline: String,
-        teamId: Int,
-        champion: String,
-        role: String = "",
-        kills: Int,
-        deaths: Int,
-        assists: Int,
-        win: Bool,
-        items: [Int],
-        goldEarned: Int = 0,
-        damageDealtToChampions: Int = 0,
-        damageTaken: Int = 0,
-        totalHeal: Int = 0,
-        creepScore: Int = 0,
-        visionScore: Int = 0,
-        wardsPlaced: Int = 0,
-        wardsKilled: Int = 0,
-        largestMultiKill: Int = 0,
-        largestKillingSpree: Int = 0,
-        turretKills: Int = 0,
-        summonerSpellIDs: [Int] = [],
-        keystoneID: Int = 0,
-        primaryRuneIDs: [Int] = [],
-        secondaryRuneIDs: [Int] = [],
-        primaryStyleID: Int = 0,
-        subStyleID: Int = 0,
-        statPerkIDs: [Int] = [],
-        champLevel: Int = 0,
-        isLinkedPlayer: Bool
-    ) {
-        self.puuid = puuid
-        self.riotIdGameName = riotIdGameName
-        self.riotIdTagline = riotIdTagline
-        self.teamId = teamId
-        self.champion = champion
+    init(_ p: RiotMatchResponse.Participant, role: String, isLinkedPlayer: Bool) {
+        puuid = p.puuid
+        riotIdGameName = p.riotIdGameName
+        riotIdTagline = p.riotIdTagline
+        teamId = p.teamId
+        champion = p.championName
         self.role = role
-        self.kills = kills
-        self.deaths = deaths
-        self.assists = assists
-        self.win = win
-        self.items = items
-        self.goldEarned = goldEarned
-        self.damageDealtToChampions = damageDealtToChampions
-        self.damageTaken = damageTaken
-        self.totalHeal = totalHeal
-        self.creepScore = creepScore
-        self.visionScore = visionScore
-        self.wardsPlaced = wardsPlaced
-        self.wardsKilled = wardsKilled
-        self.largestMultiKill = largestMultiKill
-        self.largestKillingSpree = largestKillingSpree
-        self.turretKills = turretKills
-        self.summonerSpellIDs = summonerSpellIDs
-        self.keystoneID = keystoneID
-        self.primaryRuneIDs = primaryRuneIDs
-        self.secondaryRuneIDs = secondaryRuneIDs
-        self.primaryStyleID = primaryStyleID
-        self.subStyleID = subStyleID
-        self.statPerkIDs = statPerkIDs
-        self.champLevel = champLevel
+        kills = p.kills
+        deaths = p.deaths
+        assists = p.assists
+        win = p.win
+        items = p.items
+        goldEarned = p.goldEarned
+        damageDealtToChampions = p.totalDamageDealtToChampions
+        damageTaken = p.totalDamageTaken
+        totalHeal = p.totalHeal
+        creepScore = p.totalMinionsKilled + p.neutralMinionsKilled
+        visionScore = p.visionScore
+        wardsPlaced = p.wardsPlaced
+        wardsKilled = p.wardsKilled ?? 0
+        largestMultiKill = p.largestMultiKill ?? 0
+        largestKillingSpree = p.largestKillingSpree ?? 0
+        turretKills = p.turretKills ?? 0
+        summonerSpellIDs = [p.summoner1Id, p.summoner2Id]
+        keystoneID = p.perks.keystoneID
+        primaryRuneIDs = p.perks.primaryRuneIDs
+        secondaryRuneIDs = p.perks.secondaryRuneIDs
+        primaryStyleID = p.perks.primaryStyleID
+        subStyleID = p.perks.subStyleID
+        statPerkIDs = p.perks.statPerkIDs
+        champLevel = p.champLevel ?? 0
         self.isLinkedPlayer = isLinkedPlayer
     }
 }
@@ -116,4 +84,9 @@ extension MatchParticipantSummary {
     var kda: Double {
         deaths == 0 ? Double(kills + assists) : Double(kills + assists) / Double(deaths)
     }
+
+    /// The linked player, in a game that still counts as theirs. A saved game
+    /// kept from an earlier login keeps `isLinkedPlayer`, which its focus
+    /// depends on, but stops saying "You".
+    var isYou: Bool { isLinkedPlayer && match?.isOwnHistory == true }
 }

@@ -5,22 +5,14 @@ actor DataDragonService {
 
     private static let fallbackVersion = "14.24.1"
 
-    private var cachedVersion: String?
-    // Actors are reentrant across `await` points: dozens of ChampionIconViews
-    // can all call currentVersion() before the first fetch finishes, so
-    // without this in-flight task, each one would fire its own redundant
-    // versions.json request. Later callers await the same task instead.
+    // Actors reenter across `await`: concurrent callers share this one task (kept after it
+    // finishes), so versions.json is fetched once per launch.
     private var versionTask: Task<String, Never>?
 
     func currentVersion() async -> String {
-        if let cachedVersion { return cachedVersion }
-        if let versionTask { return await versionTask.value }
-
-        let task = Task<String, Never> {
-            guard let url = URL(string: "https://ddragon.leagueoflegends.com/api/versions.json") else {
-                return Self.fallbackVersion
-            }
+        let task = versionTask ?? Task {
             do {
+                let url = URL(string: "https://ddragon.leagueoflegends.com/api/versions.json")!
                 let (data, _) = try await URLSession.shared.data(from: url)
                 let versions = try JSONDecoder().decode([String].self, from: data)
                 return versions.first ?? Self.fallbackVersion
@@ -29,10 +21,7 @@ actor DataDragonService {
             }
         }
         versionTask = task
-        let version = await task.value
-        cachedVersion = version
-        versionTask = nil
-        return version
+        return await task.value
     }
 
     func championIconURL(for championName: String) async -> URL? {
@@ -41,21 +30,14 @@ actor DataDragonService {
         return URL(string: "https://ddragon.leagueoflegends.com/cdn/\(version)/img/champion/\(id).png")
     }
 
-    /// Champion asset IDs are case-sensitive and Riot is not internally
-    /// consistent about them: Match-V5 reports Fiddlesticks as "FiddleSticks"
-    /// (capital S), which 403s against Data Dragon. Rather than hard-coding
-    /// that one alias, this matches case-insensitively against Data Dragon's
-    /// own champion list, which also covers the nine champions whose asset id
-    /// differs from their display name (Wukong -> MonkeyKing, Bel'Veth ->
-    /// Belveth, and so on) and any future additions.
+    /// Asset ids are case-sensitive and Match-V5 disagrees ("FiddleSticks" 403s); a few also
+    /// differ from the display name (Wukong -> MonkeyKing). Matching case-insensitively against
+    /// Data Dragon's own champion list resolves both.
     private var championIDsByLowercaseKey: [String: String] = [:]
-    // Same reentrancy issue as versionTask: without this, every concurrent
-    // icon request on first launch would each fetch the ~700KB champion.json.
+    // Same reentrancy guard as versionTask: one champion.json (~700KB) fetch, not one per icon.
     private var championIDsTask: Task<Void, Never>?
 
-    /// Any spelling of a champion — Riot's id ("MonkeyKing"), op.gg's display
-    /// name ("Wukong", "Nunu & Willump") — to its one Data Dragon id, so
-    /// names from different sources can be compared.
+    /// Any spelling (Riot "MonkeyKing", op.gg "Wukong") to its Data Dragon id, so sources compare.
     func resolvedChampionID(for championName: String) async -> String {
         let fallback = Self.dataDragonID(for: championName)
         if championIDsByLowercaseKey.isEmpty {
@@ -79,8 +61,7 @@ actor DataDragonService {
                 var mapping: [String: String] = [:]
                 for (id, entry) in response.data {
                     mapping[id.lowercased()] = id
-                    // Also key by the stripped display name so "NunuWillump" and
-                    // "Wukong" resolve to "Nunu" and "MonkeyKing".
+                    // Also key by the stripped display name ("Wukong" -> "MonkeyKing").
                     mapping[Self.dataDragonID(for: entry.name).lowercased()] = id
                 }
                 self.championIDsByLowercaseKey = mapping
@@ -108,8 +89,7 @@ actor DataDragonService {
         return URL(string: "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/\(id)_0.jpg")
     }
 
-    /// The portrait loading-screen art: the whole champion, face near the
-    /// top, where the landscape splash crops badly into a narrow frame.
+    /// Portrait art (face near the top) for narrow frames, where the landscape splash crops badly.
     nonisolated func loadingArtURL(for championName: String) -> URL? {
         let id = Self.dataDragonID(for: championName)
         return URL(string: "https://ddragon.leagueoflegends.com/cdn/img/champion/loading/\(id)_0.jpg")
@@ -128,10 +108,8 @@ actor DataDragonService {
     }
 
     private var itemInfoByID: [Int: ItemInfo] = [:]
-    // Every match card prices its build on first launch; same reentrancy
-    // guard as championIDsTask so item.json downloads once. Kept after it
-    // finishes, so a failed load isn't retried by every card — callers fall
-    // back to icons without names or prices for the rest of the launch.
+    // Same reentrancy guard as championIDsTask: every match card prices its build at launch. Kept
+    // after finishing so a failed load isn't retried by every card (icons only until relaunch).
     private var itemDataTask: Task<Void, Never>?
 
     func itemInfo(for itemID: Int) async -> ItemInfo? {
@@ -163,7 +141,7 @@ actor DataDragonService {
             }
             itemInfoByID = mapping
         } catch {
-            // leave empty; itemInfo(for:) just returns nil and callers fall back to icon-only.
+            // Leave empty: itemInfo(for:) returns nil and callers show icons only.
         }
     }
 
@@ -182,12 +160,8 @@ actor DataDragonService {
         }
     }
 
-    /// Name and effect text alongside the icon, so a tapped rune can show
-    /// what it actually does.
     struct RuneInfo {
-        let id: Int
         let name: String
-        let shortDescription: String
         let longDescription: String
         let iconPath: String
     }
@@ -195,15 +169,7 @@ actor DataDragonService {
     private var runeInfoByID: [Int: RuneInfo] = [:]
 
     func runeIconURL(for perkOrStyleID: Int) async -> URL? {
-        guard perkOrStyleID != 0 else { return nil }
-        if runeInfoByID.isEmpty {
-            await loadRuneData()
-        }
-        // Stat shards are absent from runesReforged.json, so they fall through
-        // to their own table rather than silently rendering as a blank slot.
-        guard let path = runeInfoByID[perkOrStyleID]?.iconPath ?? StatShard.info(for: perkOrStyleID)?.iconPath else {
-            return nil
-        }
+        guard perkOrStyleID != 0, let path = await runeInfo(for: perkOrStyleID)?.iconPath else { return nil }
         return URL(string: "https://ddragon.leagueoflegends.com/cdn/img/\(path)")
     }
 
@@ -212,16 +178,10 @@ actor DataDragonService {
             await loadRuneData()
         }
         if let rune = runeInfoByID[perkOrStyleID] { return rune }
-        // Same fallback as the icon lookup, so tapping a shard opens a detail
-        // sheet with a name instead of an endless spinner.
+        // Stat shards aren't in runesReforged.json; their own table keeps the icon from going blank
+        // and the detail sheet from spinning forever.
         guard let shard = StatShard.info(for: perkOrStyleID) else { return nil }
-        return RuneInfo(
-            id: perkOrStyleID,
-            name: shard.name,
-            shortDescription: shard.effect,
-            longDescription: shard.effect,
-            iconPath: shard.iconPath
-        )
+        return RuneInfo(name: shard.name, longDescription: shard.effect, iconPath: shard.iconPath)
     }
 
     private func loadRuneData() async {
@@ -233,19 +193,11 @@ actor DataDragonService {
             var mapping: [Int: RuneInfo] = [:]
             for tree in trees {
                 // Tree entries (Precision, Domination, …) have no description.
-                mapping[tree.id] = RuneInfo(
-                    id: tree.id,
-                    name: tree.name,
-                    shortDescription: "",
-                    longDescription: "",
-                    iconPath: tree.icon
-                )
+                mapping[tree.id] = RuneInfo(name: tree.name, longDescription: "", iconPath: tree.icon)
                 for slot in tree.slots {
                     for rune in slot.runes {
                         mapping[rune.id] = RuneInfo(
-                            id: rune.id,
                             name: rune.name,
-                            shortDescription: Self.stripHTML(rune.shortDesc ?? ""),
                             longDescription: Self.stripHTML(rune.longDesc ?? rune.shortDesc ?? ""),
                             iconPath: rune.icon
                         )
@@ -254,7 +206,7 @@ actor DataDragonService {
             }
             runeInfoByID = mapping
         } catch {
-            // leave empty; runeIconURL(for:) just returns nil and the header skips the icon.
+            // Leave empty: runeIconURL(for:) returns nil and the header skips the icon.
         }
     }
 
@@ -281,26 +233,15 @@ actor DataDragonService {
         return URL(string: "https://ddragon.leagueoflegends.com/cdn/\(version)/img/spell/\(file).png")
     }
 
-    /// Data Dragon champion asset IDs strip spaces, apostrophes, and other
-    /// punctuation from the display name (e.g. "Kai'Sa" -> "KaiSa",
-    /// "Lee Sin" -> "LeeSin"). Real Match-V5 responses already give us the
-    /// exact ID, so this only matters for hand-written mock data.
+    /// Data Dragon ids strip spaces and punctuation from the display name ("Kai'Sa" -> "KaiSa").
     private static func dataDragonID(for championName: String) -> String {
         let stripped = championName.filter { $0.isLetter || $0.isNumber }
-        // Casing fixes for names Riot's match data spells differently from its
-        // own asset IDs. championIconURL resolves these dynamically; this table
-        // exists for splashArtURL, which is synchronous and can't await the
-        // champion list. Verified against Data Dragon: "FiddleSticks" 403s,
-        // "Fiddlesticks" is 200.
-        let knownCasingFixes: [String: String] = [
-            "fiddlesticks": "Fiddlesticks"
-        ]
-        return knownCasingFixes[stripped.lowercased()] ?? stripped
+        // Match-V5 spells it "FiddleSticks", which 403s on Data Dragon. The champion list fixes it
+        // dynamically; this is for the synchronous splashArtURL, which can't await that list.
+        return stripped.lowercased() == "fiddlesticks" ? "Fiddlesticks" : stripped
     }
 
-    /// Summoner spell IDs are stable across patches; mapped by hand since
-    /// fetching summoner.json just to resolve ~11 well-known IDs isn't worth
-    /// the extra request.
+    /// Mapped by hand: ids are stable across patches, so summoner.json isn't worth a request.
     private static let summonerSpellFiles: [Int: String] = [
         1: "SummonerBoost",
         3: "SummonerExhaust",

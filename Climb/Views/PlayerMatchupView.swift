@@ -5,7 +5,6 @@ import SwiftUI
 /// the latter reconstructed from match timeline events at import time.
 struct PlayerMatchupView: View {
     let match: Match
-    let region: RiotRegion?
 
     /// Either side can be any of the ten players — comparing two teammates or
     /// two enemies is just as valid as "me vs my laner".
@@ -25,30 +24,25 @@ struct PlayerMatchupView: View {
     @ScaledMetric(relativeTo: .subheadline) private var diedColumnWidth: CGFloat = 56
     @ScaledMetric(relativeTo: .subheadline) private var assistedColumnWidth: CGFloat = 62
 
-    private var linkedPlayer: MatchParticipantSummary? {
-        match.focusParticipant
-    }
-    private var linkedTeamId: Int { linkedPlayer?.teamId ?? 100 }
+    private var linkedTeamId: Int { match.focusParticipant?.teamId ?? 100 }
     private var allies: [MatchParticipantSummary] {
         match.participants.filter { $0.teamId == linkedTeamId }
     }
     private var opponents: [MatchParticipantSummary] {
         match.participants.filter { $0.teamId != linkedTeamId }
     }
-    private var orderedParticipants: [MatchParticipantSummary] { allies + opponents }
 
     private var leftPlayer: MatchParticipantSummary? {
-        match.participants.first { $0.puuid == leftID } ?? linkedPlayer ?? allies.first
+        match.participants.first { $0.puuid == leftID } ?? match.focusParticipant ?? allies.first
     }
     private var rightPlayer: MatchParticipantSummary? {
         match.participants.first { $0.puuid == rightID } ?? defaultOpponent
     }
     /// Default the right side to the lane opponent when there is one.
     private var defaultOpponent: MatchParticipantSummary? {
-        let myRole = linkedPlayer?.role ?? ""
+        let myRole = match.focusParticipant?.role ?? ""
         return opponents.first { $0.role == myRole && !myRole.isEmpty } ?? opponents.first
     }
-    private var hasHeadToHeadData: Bool { !match.opponentEncounters.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -58,13 +52,9 @@ struct PlayerMatchupView: View {
             headToHeadCard
         }
         .onAppear {
-            if leftID == nil { leftID = linkedPlayer?.puuid ?? allies.first?.puuid }
+            if leftID == nil { leftID = match.focusParticipant?.puuid ?? allies.first?.puuid }
             if rightID == nil { rightID = defaultOpponent?.puuid }
         }
-    }
-
-    private func encounter(for opponent: MatchParticipantSummary) -> OpponentEncounter? {
-        match.opponentEncounters.first { $0.opponentPuuid == opponent.puuid }
     }
 
     // MARK: - Comparison card (picker + versus banner + radar)
@@ -95,7 +85,7 @@ struct PlayerMatchupView: View {
                     ? [GridItem(.adaptive(minimum: statCellMinWidth), spacing: 8)]
                     : [GridItem(.flexible()), GridItem(.flexible())]
                 LazyVGrid(columns: statColumns, spacing: 8) {
-                    ForEach(axes) { axis in
+                    ForEach(axes, id: \.label) { axis in
                         statComparisonRow(axis: axis)
                     }
                 }
@@ -169,9 +159,7 @@ struct PlayerMatchupView: View {
     /// one that's already selected swaps the two sides.
     private func select(_ participant: MatchParticipantSummary) {
         if participant.puuid == leftPlayer?.puuid || participant.puuid == rightPlayer?.puuid {
-            let previousLeft = leftID
-            leftID = rightID
-            rightID = previousLeft
+            (leftID, rightID) = (rightID, leftID)
             return
         }
         if participant.teamId == linkedTeamId {
@@ -221,7 +209,7 @@ struct PlayerMatchupView: View {
                 ChampionIconView(championName: participant.champion, size: combatantPortraitSize)
             }
             VStack(alignment: alignment, spacing: 2) {
-                Text(participant.isLinkedPlayer ? "You" : participant.riotIdGameName)
+                Text(participant.isYou ? "You" : participant.riotIdGameName)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(tint)
                     .lineLimit(1)
@@ -240,8 +228,7 @@ struct PlayerMatchupView: View {
 
     // MARK: - Radar data
 
-    private struct RadarAxis: Identifiable {
-        let id = UUID()
+    private struct RadarAxis {
         let label: String
         let meValue: Double
         let opponentValue: Double
@@ -276,8 +263,7 @@ struct PlayerMatchupView: View {
             }
         }
         .padding(8)
-        .background(Theme.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
+        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
     }
 
     // MARK: - Head-to-head kill record
@@ -292,7 +278,7 @@ struct PlayerMatchupView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if hasHeadToHeadData {
+            if !match.opponentEncounters.isEmpty {
                 // A four-column table: it stops being a table long before the
                 // largest text size, so its scaling is capped.
                 VStack(spacing: 0) {
@@ -332,7 +318,7 @@ struct PlayerMatchupView: View {
     }
 
     private func headToHeadRow(_ opponent: MatchParticipantSummary) -> some View {
-        let record = encounter(for: opponent)
+        let record = match.opponentEncounters.first { $0.opponentPuuid == opponent.puuid }
         return HStack {
             HStack(spacing: 8) {
                 ChampionIconView(championName: opponent.champion, size: rowPortraitSize)
@@ -360,8 +346,6 @@ struct PlayerMatchupView: View {
     // MARK: - Helpers
 
     private func participation(_ participant: MatchParticipantSummary) -> Double {
-        let teamKills = match.participants.filter { $0.teamId == participant.teamId }.map(\.kills).reduce(0, +)
-        guard teamKills > 0 else { return 0 }
-        return Double(participant.kills + participant.assists) / Double(teamKills) * 100
+        (match.killShare(of: participant) ?? 0) * 100
     }
 }

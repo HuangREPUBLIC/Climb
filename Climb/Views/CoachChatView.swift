@@ -1,13 +1,8 @@
 import SwiftUI
 import SwiftData
 
-/// The conversational coach.
-///
-/// Three things make this readable rather than a wall of text: the match it is
-/// about is pinned at the top so the thread has a subject, coach replies are
-/// parsed into a verdict / findings / one action instead of being printed raw
-/// (see `CoachReplyView`), and follow-up questions are always one tap away
-/// rather than something the player has to think up and type.
+/// The conversational coach: the match is pinned on top, replies are parsed into verdict / findings / action
+/// (see `CoachReplyView`) rather than printed raw, and follow-up questions are always one tap away.
 struct CoachChatView: View {
     @Bindable var match: Match
     @Environment(\.modelContext) private var modelContext
@@ -23,8 +18,7 @@ struct CoachChatView: View {
     @ScaledMetric(relativeTo: .caption2) private var typingDotSize: CGFloat = 6
     @ScaledMetric(relativeTo: .subheadline) private var sendButtonSize: CGFloat = 34
 
-    /// Openers before the first reply, follow-ups after — a chip row that keeps
-    /// offering "what went wrong" once that has been answered is dead weight.
+    /// Openers before the first reply, follow-ups after (re-offering "what went wrong" is dead weight).
     private var promptSuggestions: [String] {
         sortedMessages.isEmpty
             ? ["What went wrong in this game?", "What should I build next time?", "How's my recent form?"]
@@ -76,11 +70,9 @@ struct CoachChatView: View {
 
             composer
         }
-        .background(Theme.background)
-        .navigationTitle("AI Coach")
+        .screen("AI Coach")
         // A conversation wants the full height for the input bar.
         .hidesTabBar()
-        .navigationBarTitleDisplayMode(.inline)
         .task {
             conversation = CoachService.conversation(for: match, context: modelContext)
         }
@@ -104,10 +96,7 @@ struct CoachChatView: View {
         .padding(.vertical, 8)
     }
 
-    @ViewBuilder
     private func bubble(for message: ChatMessage) -> some View {
-        // Each side indents away from the opposite edge so the thread reads as
-        // a conversation rather than two stacked columns of full-width text.
         HStack(alignment: .top, spacing: 8) {
             if message.role == .coach {
                 coachAvatar
@@ -128,16 +117,9 @@ struct CoachChatView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                message.role == .player
-                    ? AnyShapeStyle(Theme.accent)
-                    : AnyShapeStyle(Theme.surface)
-            )
-            .clipShape(bubbleShape(for: message.role))
+            .background(message.role == .player ? Theme.accent : Theme.surface, in: bubbleShape(for: message.role))
             .overlay(
-                // A hairline, not a shadow: these sit on a grouped background
-                // where a shadow reads as clutter, but the coach bubble still
-                // needs an edge to separate it from the surface behind it.
+                // Hairline, not shadow (clutter on a grouped background); the coach bubble still needs an edge.
                 bubbleShape(for: message.role)
                     .strokeBorder(
                         message.role == .coach ? Color.primary.opacity(0.06) : .clear,
@@ -173,8 +155,7 @@ struct CoachChatView: View {
             .accessibilityHidden(true)
     }
 
-    /// Three dots breathing in sequence. A static row of dots reads as a
-    /// rendering glitch; the movement is what says "still thinking".
+    /// Three dots breathing in sequence: a static row reads as a glitch, the movement says "still thinking".
     private var typingIndicator: some View {
         HStack(alignment: .top, spacing: 8) {
             coachAvatar
@@ -194,8 +175,7 @@ struct CoachChatView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Theme.surface)
-            .clipShape(bubbleShape(for: .coach))
+            .background(Theme.surface, in: bubbleShape(for: .coach))
             Spacer(minLength: 20)
         }
         .onAppear { typingPhase = true }
@@ -220,9 +200,7 @@ struct CoachChatView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
-            // Suggestions stay available for the whole conversation, because
-            // "ask a follow-up" is the feature — making the player compose one
-            // from scratch every time is what turns a chat into a search box.
+            // Suggestions stay all conversation: follow-ups are the feature, not something to type from scratch.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(promptSuggestions, id: \.self) { prompt in
@@ -235,8 +213,7 @@ struct CoachChatView: View {
                                 .foregroundStyle(Theme.accent)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .background(Theme.accent.opacity(0.12))
-                                .clipShape(Capsule())
+                                .background(Theme.accent.opacity(0.12), in: Capsule())
                         }
                         .buttonStyle(PressableButtonStyle())
                         .disabled(isSending)
@@ -262,10 +239,8 @@ struct CoachChatView: View {
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(width: sendButtonSize, height: sendButtonSize)
-                        .background(canSend ? Theme.accent : Color.secondary.opacity(0.4))
-                        .clipShape(Circle())
-                        // The circle stays 34pt for balance against the field,
-                        // but the tappable area is a full 44.
+                        .background(canSend ? Theme.accent : Color.secondary.opacity(0.4), in: Circle())
+                        // The circle stays 34pt to balance the field; the tappable area is a full 44.
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
                 }

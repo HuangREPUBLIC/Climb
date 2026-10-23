@@ -14,7 +14,7 @@ struct ScoreboardRowView: View {
     @State private var panel: Panel = .runes
     /// Current solo rank, looked up on demand — Riot's match data carries no
     /// per-match tier, and it isn't the linked player's data to store.
-    @State private var rank: RankLookupService.SoloRank?
+    @State private var rank: RiotLeagueEntry?
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -25,6 +25,12 @@ struct ScoreboardRowView: View {
     @ScaledMetric(relativeTo: .caption2) private var levelBadgeSize: CGFloat = 15
 
     private enum Panel { case runes, items, stats }
+
+    /// Nil when an older API key imported the match: its ids no longer
+    /// decrypt, and a saved game can be days old.
+    private var currentPUUID: String? {
+        match.importVersion == MatchImportService.currentDataVersion ? participant.puuid : nil
+    }
 
     /// Where they placed out of ten — "4th", "第4" — in the reader's language.
     private static let ordinal: NumberFormatter = {
@@ -51,8 +57,8 @@ struct ScoreboardRowView: View {
         }
         .padding(.vertical, 6)
         .task(id: participant.puuid) {
-            guard let platform else { return }
-            rank = await RankLookupService.fetchSoloRank(puuid: participant.puuid, platform: platform)
+            guard let platform, let puuid = currentPUUID else { return }
+            rank = await RiotAPIClient.shared.soloRank(puuid: puuid, platform: platform)
         }
     }
 
@@ -65,11 +71,11 @@ struct ScoreboardRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
                     Text(participant.riotIdGameName)
-                        .font(.caption.weight(participant.isLinkedPlayer ? .bold : .regular))
-                        .foregroundStyle(participant.isLinkedPlayer ? Theme.accent : .primary)
+                        .font(.caption.weight(participant.isYou ? .bold : .regular))
+                        .foregroundStyle(participant.isYou ? Theme.accent : .primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    if participant.isLinkedPlayer { badge("YOU", tint: Theme.accent) }
+                    if participant.isYou { badge("YOU", tint: Theme.accent) }
                     if let award { badge(award.text, tint: award.tint) }
                     Spacer(minLength: 4)
                     scoreLabel
@@ -131,7 +137,7 @@ struct ScoreboardRowView: View {
         if let rank {
             HStack(spacing: 1) {
                 RankIconView(tier: rank.tier, size: rankIconSize)
-                Text(rank.division)
+                Text(rank.rank)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
             }
@@ -166,8 +172,7 @@ struct ScoreboardRowView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 4)
             .padding(.vertical, 1.5)
-            .background(tint)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
+            .background(tint, in: RoundedRectangle(cornerRadius: Theme.chipRadius, style: .continuous))
             .fixedSize()
     }
 
@@ -189,19 +194,18 @@ struct ScoreboardRowView: View {
                     secondaryRuneIDs: participant.secondaryRuneIDs,
                     primaryStyleID: participant.primaryStyleID,
                     subStyleID: participant.subStyleID,
-                    statPerkIDs: participant.statPerkIDs,
-                    alignment: .leading
+                    statPerkIDs: participant.statPerkIDs
                 )
             case .items:
-                ItemBuildListView(items: participant.items, alignment: .leading)
+                ItemBuildListView(items: participant.items)
             case .stats:
                 statsGrid
             }
 
-            if !participant.isLinkedPlayer, let region {
+            if !participant.isYou, let region {
                 NavigationLink {
                     PlayerProfileView(
-                        puuid: participant.puuid,
+                        puuid: currentPUUID,
                         riotIdGameName: participant.riotIdGameName,
                         riotIdTagline: participant.riotIdTagline,
                         region: region,
@@ -212,51 +216,32 @@ struct ScoreboardRowView: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(Theme.accent.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 }
                 .buttonStyle(PressableButtonStyle())
             }
         }
         .padding(12)
-        .background(Theme.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 
     private var statsGrid: some View {
-        let team = match.participants.filter { $0.teamId == participant.teamId }
-        let teamKills = team.map(\.kills).reduce(0, +)
-        let killParticipation = teamKills > 0
-            ? Int((Double(participant.kills + participant.assists) / Double(teamKills) * 100).rounded())
-            : 0
+        let killParticipation = Int(((match.killShare(of: participant) ?? 0) * 100).rounded())
         let minutes = match.minutes
         let columns = dynamicTypeSize.isAccessibilitySize
             ? [GridItem(.flexible()), GridItem(.flexible())]
             : Array(repeating: GridItem(.flexible()), count: 4)
 
         return LazyVGrid(columns: columns, spacing: 10) {
-            stat("\(killParticipation)%", "Kill share")
-            stat(participant.damageDealtToChampions.formatted(), "Damage")
-            stat(participant.damageTaken.formatted(), "Taken")
-            stat(participant.goldEarned.formatted(), "Gold")
-            stat("\(participant.creepScore) (\(String(format: "%.1f", Double(participant.creepScore) / minutes)))", "Minions")
-            stat("\(participant.visionScore)", "Vision")
-            stat("\(participant.wardsPlaced)/\(participant.wardsKilled)", "Wards")
-            stat(participant.totalHeal.formatted(), "Healing")
+            MiniStat(value: "\(killParticipation)%", label: "Kill share", weight: .semibold, spacing: 2)
+            MiniStat(value: participant.damageDealtToChampions.formatted(), label: "Damage", weight: .semibold, spacing: 2)
+            MiniStat(value: participant.damageTaken.formatted(), label: "Taken", weight: .semibold, spacing: 2)
+            MiniStat(value: participant.goldEarned.formatted(), label: "Gold", weight: .semibold, spacing: 2)
+            MiniStat(value: "\(participant.creepScore) (\(String(format: "%.1f", Double(participant.creepScore) / minutes)))", label: "Minions", weight: .semibold, spacing: 2)
+            MiniStat(value: "\(participant.visionScore)", label: "Vision", weight: .semibold, spacing: 2)
+            MiniStat(value: "\(participant.wardsPlaced)/\(participant.wardsKilled)", label: "Wards", weight: .semibold, spacing: 2)
+            MiniStat(value: participant.totalHeal.formatted(), label: "Healing", weight: .semibold, spacing: 2)
         }
-    }
-
-    private func stat(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .scaledFont(9)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
     }
 }
 
@@ -281,6 +266,28 @@ struct ItemSlots: View {
                 }
             }
         }
+    }
+}
+
+/// A small number over its label: the scoreboard's stat panel and the match
+/// screen's per-minute rates.
+struct MiniStat: View {
+    let value: String
+    let label: String
+    let weight: Font.Weight
+    let spacing: CGFloat
+
+    var body: some View {
+        VStack(spacing: spacing) {
+            Text(value)
+                .font(.caption.weight(weight).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .scaledFont(9)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

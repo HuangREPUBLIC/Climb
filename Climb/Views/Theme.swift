@@ -70,9 +70,6 @@ enum Theme {
     static let win = good
     static let loss = poor
 
-    /// Charts use the accent rather than a per-screen colour.
-    static let chart = accent
-
     static let shadow = Color.black.opacity(0.06)
 
     /// KDA ratio: 3+ is good, under 1 means dying more than helping. Banded
@@ -83,14 +80,11 @@ enum Theme {
     }
 }
 
-/// Standard card surface. Replaces the per-file `sectionCard` helpers that
-/// had each drifted to slightly different padding, radius and shadow.
-struct CardSurface: ViewModifier {
-    var padding: CGFloat = Theme.cardPadding
-
-    func body(content: Content) -> some View {
-        content
-            .padding(padding)
+extension View {
+    /// Standard card surface. Replaces the per-file `sectionCard` helpers that
+    /// had each drifted to slightly different padding, radius and shadow.
+    func cardSurface(padding: CGFloat = Theme.cardPadding) -> some View {
+        self.padding(padding)
             .background(Theme.surface)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .overlay(
@@ -99,11 +93,25 @@ struct CardSurface: ViewModifier {
             )
             .cardShadow()
     }
+
+    /// A screen's page background and inline title.
+    func screen(_ title: String) -> some View {
+        background(Theme.background)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+    }
 }
 
-extension View {
-    func cardSurface(padding: CGFloat = Theme.cardPadding) -> some View {
-        modifier(CardSurface(padding: padding))
+/// A card of rows stacked at the item rhythm — the section body on the match,
+/// team and stats screens.
+struct SectionCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.itemSpacing) {
+            content
+        }
+        .cardSurface()
     }
 }
 
@@ -157,13 +165,6 @@ extension View {
             monospacedDigit: monospacedDigit
         ))
     }
-}
-
-extension CGFloat {
-    /// Icons and badges have to grow with the text they sit beside, but not
-    /// without limit — a 44pt portrait at the largest accessibility size is
-    /// 150pt wide and leaves nothing for the row it belongs to.
-    func capped(at limit: CGFloat) -> CGFloat { Swift.min(self, limit) }
 }
 
 // MARK: - Dense content
@@ -254,8 +255,7 @@ struct ErrorCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(Theme.cardPadding)
-        .background(Theme.loss.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .background(Theme.loss.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .cardShadow()
     }
 }
@@ -266,8 +266,8 @@ struct EmptyStateCard: View {
     let icon: String
     let title: String
     let message: String
-    /// 0...1 when the empty state is a countdown ("3 of 5 games").
-    var progress: Double?
+    /// 0...1 through the countdown ("3 of 5 games").
+    let progress: Double
 
     var body: some View {
         VStack(spacing: 8) {
@@ -281,12 +281,10 @@ struct EmptyStateCard: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            if let progress {
-                ProgressView(value: progress)
-                    .tint(Theme.accent)
-                    .padding(.top, 4)
-                    .padding(.horizontal, 24)
-            }
+            ProgressView(value: progress)
+                .tint(Theme.accent)
+                .padding(.top, 4)
+                .padding(.horizontal, 24)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -317,27 +315,37 @@ struct PrimaryButton: View {
     var icon: String?
     var isWorking = false
     var isEnabled = true
+    var workingNote: String?
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if isWorking {
-                    ProgressView().controlSize(.small).tint(.white)
-                } else if let icon {
-                    Image(systemName: icon)
+        VStack(spacing: 8) {
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    if isWorking {
+                        ProgressView().controlSize(.small).tint(.white)
+                    } else if let icon {
+                        Image(systemName: icon)
+                    }
+                    Text(title).fontWeight(.semibold)
                 }
-                Text(title).fontWeight(.semibold)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .foregroundStyle(.white)
+                .background(
+                    isEnabled && !isWorking ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.secondary.opacity(0.4)),
+                    in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                )
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 15)
-            .foregroundStyle(.white)
-            .background(
-                isEnabled && !isWorking ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.secondary.opacity(0.4)),
-                in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-            )
+            .buttonStyle(PressableButtonStyle())
+            .disabled(!isEnabled || isWorking)
+
+            if isWorking, let workingNote {
+                Text(workingNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
-        .buttonStyle(PressableButtonStyle())
-        .disabled(!isEnabled || isWorking)
     }
 }

@@ -1,28 +1,18 @@
 import Foundation
 import SwiftData
 import CryptoKit
+import UserNotifications
 
-@MainActor
 enum MatchImportService {
-    /// Bump whenever the import writes fields older records don't have.
-    ///
-    /// Each match remembers the version that built it (`Match.importVersion`),
-    /// and a stale match is rebuilt *in place* on the next sync: the Riot-derived
-    /// rows under it are replaced, but the `Match` row itself — the player's
-    /// notes, tags and coach conversation — is never deleted.
-    /// v10: per-match versioning; the rebuild also clears the duplicate
-    /// scoreboard rows that overlapping syncs used to insert.
+    /// Bump when the import writes fields older records lack. Stale matches are rebuilt in place on
+    /// the next sync: Riot rows are replaced, the `Match` row (notes, tags, coach chat) is kept.
     static let currentDataVersion = 10
 
-    /// How many recent games a sync looks at. op.gg and 掌盟 both open on 20,
-    /// and 20 matches plus their timelines fit inside one personal-key window
-    /// (100 requests / 2 min).
+    /// 20 matches plus their timelines fit one personal-key window (100 requests / 2 min).
     static let recentMatchCount = 20
 
-    /// PUUIDs are encrypted per API key: Riot answers a lookup made with a
-    /// different key than the one that issued the id with
-    /// "Bad Request - Exception decrypting …". So a key change marks every
-    /// stored match stale, and the next syncs rebuild them with fresh ids.
+    /// PUUIDs are encrypted per API key; another key's id fails with "Exception decrypting".
+    /// So a key change marks every stored match stale; the next syncs rebuild them with fresh ids.
     private static let apiKeyFingerprintDefaultsKey = "riotAPIKeyFingerprint"
 
     private static var storedKeyFingerprint: String? {
@@ -30,10 +20,7 @@ enum MatchImportService {
         set { UserDefaults.standard.set(newValue, forKey: apiKeyFingerprintDefaultsKey) }
     }
 
-    /// Only a short digest is persisted — never the key itself.
-    ///
-    /// SHA-256 rather than `Hasher`/`hashValue`: Swift seeds those randomly
-    /// per process, so the same key would hash differently on every launch.
+    /// Persists only a short SHA-256 digest, never the key (`hashValue` is seeded per process).
     private static var currentKeyFingerprint: String {
         let digest = SHA256.hash(data: Data(APIKeys.riot.utf8))
         return digest.map { String(format: "%02x", $0) }.joined().prefix(16).description
@@ -43,27 +30,21 @@ enum MatchImportService {
         storedKeyFingerprint != currentKeyFingerprint
     }
 
-    /// Games Riot listed but won't serve (gone, or undecodable). Skipped for
-    /// the rest of the session so "load older" doesn't retry them every tap.
+    /// Games Riot lists but won't serve; skipped this session so "load older" doesn't retry them.
     private static var unavailableIDs: Set<String> = []
 
-    /// The most recently started import. Every new one waits for it first.
     private static var lastImport: Task<Void, Never>?
 
-    /// How many of other players' games to keep. About ten profiles' worth.
+    /// About ten profiles' worth of other players' games.
     static let browsedCacheLimit = 150
 
-    /// Other players' games are only a cache — reopening a profile fetches
-    /// whatever is gone — so keep the newest `browsedCacheLimit`, and drop any
-    /// copy whose viewer can't be found in it (an older id scheme), which can
-    /// never be looked up again.
-    ///
-    /// ponytail: newest by game date, not by when it was last opened; a friend
-    /// who hasn't played in a while gets re-fetched. Track a last-viewed date if
-    /// that starts to cost requests.
+    /// A cache of other players' games: keep the newest `browsedCacheLimit`, and drop copies whose
+    /// viewer isn't in their scoreboard (old id scheme, unfindable). Saved games are skipped.
+    /// ponytail: newest by game date, not last opened, so an inactive friend is re-fetched; track a
+    /// last-viewed date if that costs requests.
     private static func pruneBrowsedCopies(context: ModelContext) {
         let descriptor = FetchDescriptor<Match>(
-            predicate: #Predicate { !$0.isOwnHistory },
+            predicate: #Predicate { !$0.isOwnHistory && !$0.isSaved },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         guard let browsed = try? context.fetch(descriptor) else { return }
@@ -73,12 +54,8 @@ enum MatchImportService {
         try? context.save()
     }
 
-    /// Runs imports one at a time, in call order.
-    ///
-    /// Launch, both pull-to-refreshes, the account sheet and "load older" can
-    /// all fire at once. Two overlapping imports each inserted the same
-    /// match's scoreboard, which doubled every team total and put a "19th" in
-    /// a ten-player game. Chaining here protects every caller at once.
+    /// Runs imports one at a time, in call order: launch, refreshes, the account sheet and "load
+    /// older" can fire together; overlapping imports each insert a scoreboard, doubling totals.
     private static func serialized<T: Sendable>(_ work: @escaping @MainActor () async throws -> T) async throws -> T {
         let previous = lastImport
         let task = Task { @MainActor in
@@ -89,9 +66,7 @@ enum MatchImportService {
         return try await task.value
     }
 
-    /// Syncs on launch when something is stale — an import-logic bump, a key
-    /// change, a timeline an earlier sync couldn't fetch — or the last sync is
-    /// over ten minutes old, the way 掌盟 and op.gg refresh when opened.
+    /// Syncs on launch if a match is stale or the last sync is over ten minutes old.
     static func refreshIfNeeded(context: ModelContext) async {
         pruneBrowsedCopies(context: context)
         guard let account = try? context.fetch(FetchDescriptor<LinkedAccount>()).first else { return }
@@ -108,19 +83,21 @@ enum MatchImportService {
         try? await syncLinkedAccount(context: context)
     }
 
-    /// Re-syncs the linked account with its stored Riot ID and game choices —
-    /// what pull-to-refresh does. No account linked is a no-op.
+    /// Pull-to-refresh: re-syncs the linked account (no-op if none). The account is read when this
+    /// sync's turn: read earlier, a refresh queued behind a logout would link it straight back.
     static func syncLinkedAccount(context: ModelContext) async throws {
-        guard let account = try context.fetch(FetchDescriptor<LinkedAccount>()).first,
-              let platform = RiotPlatform(rawValue: account.platform)
-        else { return }
-        try await linkAndSync(
-            gameName: account.riotGameName,
-            tagLine: account.riotTagline,
-            platform: platform,
-            gamesToSync: Set(account.syncedGames),
-            context: context
-        )
+        try await serialized {
+            guard let account = try context.fetch(FetchDescriptor<LinkedAccount>()).first,
+                  let platform = RiotPlatform(rawValue: account.platform)
+            else { return }
+            try await performSync(
+                gameName: account.riotGameName,
+                tagLine: account.riotTagline,
+                platform: platform,
+                gamesToSync: Set(account.syncedGames),
+                context: context
+            )
+        }
     }
 
     static func linkAndSync(
@@ -141,9 +118,7 @@ enum MatchImportService {
         }
     }
 
-    /// The next page of League history below what's stored — "load older" at
-    /// the foot of the match list. Returns how many games it added; 0 means
-    /// Riot has nothing older (or the rate limit stopped it first).
+    /// "Load older": imports the next games below what's stored; returns the number added.
     @discardableResult
     static func loadOlderMatches(context: ModelContext) async throws -> Int {
         try await serialized {
@@ -155,10 +130,8 @@ enum MatchImportService {
             let puuid = try await client.resolvePUUID(gameName: account.riotGameName, tagLine: account.riotTagline, region: region)
             let known = Set(try context.fetch(FetchDescriptor<Match>(predicate: #Predicate { $0.isOwnHistory })).map(\.id))
 
-            // Walk Riot's list from the top and take the first games not yet
-            // stored. Offsetting by the stored count would skip any gap — more
-            // than 20 games between syncs, or another account's matches. IDs
-            // are one request per hundred, so the walk itself is cheap.
+            // Walk Riot's list from the top for unstored games: an offset by the stored count would
+            // skip gaps (20+ games between syncs, another account's matches). 100 IDs per request.
             var newIDs: [String] = []
             var start = 0
             while newIDs.count < recentMatchCount {
@@ -174,10 +147,7 @@ enum MatchImportService {
                 let complete: Bool
                 do {
                     complete = try await importLeagueMatch(matchID, into: nil, client: client, puuid: puuid, region: region, context: context)
-                } catch RiotAPIError.rateLimited {
-                    hitRateLimit = true
-                    break
-                } catch RiotAPIError.network {
+                } catch RiotAPIError.rateLimited, RiotAPIError.network {
                     hitRateLimit = true
                     break
                 } catch RiotAPIError.unauthorized {
@@ -206,7 +176,6 @@ enum MatchImportService {
         let region = platform.region
         let client = RiotAPIClient.shared
         let puuid = try await client.resolvePUUID(gameName: gameName, tagLine: tagLine, region: region)
-        // Riot accepted the key, so the expiry banner can go.
         APIKeyPrompt.shared.riotKeyRejected = false
         let summoner = try? await client.fetchSummoner(puuid: puuid, platform: platform)
         let leagueEntries = try? await client.fetchLeagueEntries(puuid: puuid, platform: platform)
@@ -244,8 +213,7 @@ enum MatchImportService {
         if apiKeyChangedSinceLastImport {
             // Browsed copies too: their scoreboards hold old-key ids as well.
             for match in try context.fetch(FetchDescriptor<Match>()) { match.importVersion = 0 }
-            // Recorded now, not at the end: a rebuild that runs into the rate
-            // limit must not re-mark everything stale on every later sync.
+            // Recorded now, so a rate-limited rebuild doesn't re-mark everything stale every sync.
             storedKeyFingerprint = currentKeyFingerprint
             try context.save()
         }
@@ -272,7 +240,6 @@ enum MatchImportService {
 
         try context.save()
 
-        // The newest match is the one the reminder should open.
         var newestDescriptor = FetchDescriptor<Match>(
             predicate: #Predicate { $0.isOwnHistory },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
@@ -287,21 +254,11 @@ enum MatchImportService {
         updateWidgetSnapshot(context: context)
     }
 
-    /// Linking a different account starts clean: the old account's games
-    /// (with their AI reviews and coach chats, which cascade), its rank and
-    /// the widget's last match all go. Runs before the import, so a failed
-    /// sync can't leave the old games under the new name.
-    ///
-    /// A game's owner is its linked player's puuid, but puuids change with the
-    /// API key (see `apiKeyFingerprintDefaultsKey`), so they are only compared
-    /// on games imported under the current key. That per-game check also
-    /// cleans a store that already mixes accounts. A different Riot ID is a
-    /// switch unless one of those games belongs to the new puuid — then it's
-    /// the same player, renamed.
-    ///
-    /// ponytail: a rename right after a key change (no comparable games yet)
-    /// still reads as a switch; store the account's puuid per key if that
-    /// starts to matter.
+    /// Linking a different account starts clean (games, rank, widget) before the import, so a
+    /// failed sync can't leave old games under the new name. A new Riot ID is a switch unless a
+    /// game imported under the current key has the new puuid (a rename); puuids change per key.
+    /// ponytail: a rename right after a key change (no comparable games yet) reads as a switch;
+    /// store the account's puuid per key if that matters.
     private static func dropOtherAccountsHistory(gameName: String, tagLine: String, puuid: String, context: ModelContext) throws {
         let existing = try context.fetch(FetchDescriptor<LinkedAccount>()).first
         let own = try context.fetch(FetchDescriptor<Match>(predicate: #Predicate { $0.isOwnHistory }))
@@ -316,11 +273,10 @@ enum MatchImportService {
         let foreign = switched ? own : comparable.filter { match in
             match.focusParticipant.map { $0.puuid != puuid } ?? false
         }
-        for match in foreign { context.delete(match) }
+        removeFromHistory(foreign, context: context)
 
         if switched, let existing {
-            // Reset in place rather than deleted: an empty account list, even
-            // for a moment, would swap ContentView to onboarding mid-sync.
+            // Reset in place, not deleted: an empty account list would show onboarding mid-sync.
             existing.profileIconID = nil
             existing.summonerLevel = nil
             existing.lastLeagueSyncDate = nil
@@ -329,11 +285,79 @@ enum MatchImportService {
             applyRank(nil, to: existing)
         }
         guard switched || !foreign.isEmpty else { return }
+        clearAccountCaches()
+        try context.save()
+    }
+
+    /// Unlinks the account; games leave as in a switch. API keys and followed players stay: they
+    /// belong to the device, not the Riot account.
+    static func logOut(context: ModelContext) async throws {
+        // Queued behind any running sync, which would write the account back.
+        try await serialized {
+            removeFromHistory(try context.fetch(FetchDescriptor<Match>(predicate: #Predicate { $0.isOwnHistory })), context: context)
+            for account in try context.fetch(FetchDescriptor<LinkedAccount>()) { context.delete(account) }
+            clearAccountCaches()
+            try context.save()
+        }
+    }
+
+    private static func clearAccountCaches() {
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
         WidgetSnapshotWriter.clear()
         UserDefaults.standard.removeObject(forKey: "trendDiagnosis")
         UserDefaults.standard.removeObject(forKey: "trendDiagnosisKey")
-        try context.save()
     }
+
+    /// Drops games from the history (logout, switch); a saved game stays, under Saved Games only.
+    private static func removeFromHistory(_ matches: [Match], context: ModelContext) {
+        for match in matches {
+            if match.isSaved { match.isOwnHistory = false } else { context.delete(match) }
+        }
+    }
+
+    /// Puts a game `removeFromHistory` kept back into the history. Reused, never re-inserted:
+    /// `Match.id` is unique, and a second copy would double its scoreboard.
+    private static func reclaimKeptMatch(id: String, context: ModelContext) -> Match? {
+        var descriptor = FetchDescriptor<Match>(predicate: #Predicate { $0.id == id && !$0.isOwnHistory })
+        descriptor.fetchLimit = 1
+        guard let kept = try? context.fetch(descriptor).first else { return nil }
+        kept.isOwnHistory = true
+        return kept
+    }
+
+    #if DEBUG
+    /// Runs at launch in debug builds, on a throwaway in-memory store.
+    static func selfCheck() {
+        let container = try! ModelContainer(for: Match.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+        for (id, own, saved) in [("JP1_1", true, true), ("JP1_2", true, false),
+                                 ("browsed:p:JP1_3", false, true), ("browsed:p:JP1_4", false, false)] {
+            let match = newMatch(id: id, game: .league)
+            match.isOwnHistory = own
+            match.isSaved = saved
+            context.insert(match)
+        }
+        var failures: [String] = []
+        func ids() -> Set<String> { Set(((try? context.fetch(FetchDescriptor<Match>())) ?? []).map(\.id)) }
+        removeFromHistory(try! context.fetch(FetchDescriptor<Match>(predicate: #Predicate { $0.isOwnHistory })), context: context)
+        try? context.save()
+        if ids().contains("JP1_2") { failures.append("logging out deletes an unsaved game") }
+        // No copy has its viewer in a scoreboard, which drops an unsaved one.
+        pruneBrowsedCopies(context: context)
+
+        let left = try! context.fetch(FetchDescriptor<Match>())
+        if ids() != ["JP1_1", "browsed:p:JP1_3"] {
+            failures.append("only saved games outlive logout and the cache cap, got \(ids().sorted())")
+        }
+        if left.first(where: { $0.id == "JP1_1" })?.isOwnHistory != false {
+            failures.append("a kept game leaves the history")
+        }
+        if reclaimKeptMatch(id: "JP1_1", context: context)?.isOwnHistory != true {
+            failures.append("its account syncing again takes a kept game back")
+        }
+        assert(failures.isEmpty, failures.joined(separator: "; "))
+    }
+    #endif
 
     private static func applyRank(_ entry: RiotLeagueEntry?, to account: LinkedAccount) {
         account.rankTier = entry?.tier
@@ -366,9 +390,8 @@ enum MatchImportService {
 
     // MARK: - League
 
-    /// Imports the recent page, then rebuilds any stored match an older import
-    /// left stale, newest first. Stops at the first rate limit; whatever is
-    /// left stays stale and the next sync picks it up.
+    /// Imports the recent page, then rebuilds stale stored matches newest first. Stops at the first
+    /// rate limit; whatever is left stays stale for the next sync.
     private static func syncLeague(
         client: RiotAPIClient,
         puuid: String,
@@ -390,19 +413,15 @@ enum MatchImportService {
             let complete: Bool
             do {
                 complete = try await importLeagueMatch(matchID, into: existing, client: client, puuid: puuid, region: region, context: context)
-            } catch RiotAPIError.rateLimited {
+            } catch RiotAPIError.rateLimited, RiotAPIError.network {
                 break
-            } catch RiotAPIError.network {
-                break
-            } catch RiotAPIError.unexpectedStatus(let code) where code >= 500 {
+            } catch RiotAPIError.unexpectedStatus(500...) {
                 continue // Riot hiccup — stays stale, retried next sync
             } catch RiotAPIError.unauthorized {
-                // The key expired mid-sync: stop, and leave the rest for the
-                // next key rather than writing them off as unavailable.
+                // Key expired mid-sync: stop, don't write the rest off as unavailable.
                 throw RiotAPIError.unauthorized
             } catch {
-                // Riot will never serve this match (gone, or undecodable), so
-                // stop retrying it on every launch. Its old rows stay as they are.
+                // Never served (gone or undecodable): stop retrying it every launch; old rows stay.
                 existing?.importVersion = currentDataVersion
                 continue
             }
@@ -412,9 +431,8 @@ enum MatchImportService {
         return insertedCount
     }
 
-    /// Returns false when the timeline failed for a transient reason. The
-    /// match is still saved, but left stale so a later sync fills in the gold
-    /// curve and head-to-head instead of losing them for good.
+    /// Returns false when the timeline failed transiently: the match is saved but left stale, so a
+    /// later sync fills in the gold curve and head-to-head.
     private static func importLeagueMatch(
         _ matchID: String,
         into existing: Match?,
@@ -429,39 +447,34 @@ enum MatchImportService {
         var complete = true
         do {
             timeline = try await client.fetchMatchTimeline(matchID: matchID, region: region)
-        } catch RiotAPIError.rateLimited {
-            complete = false
-        } catch RiotAPIError.network {
-            complete = false
-        } catch RiotAPIError.unexpectedStatus(let code) where code >= 500 {
+        } catch RiotAPIError.rateLimited, RiotAPIError.network, RiotAPIError.unexpectedStatus(500...) {
             complete = false
         } catch RiotAPIError.unauthorized {
             throw RiotAPIError.unauthorized
         } catch {
-            // No timeline exists for this game (old, or a mode without one) —
-            // nothing a retry would change.
+            // No timeline for this game (old, or a mode without one); a retry changes nothing.
         }
 
-        let match = existing ?? newMatch(id: matchID, game: .league)
-        if existing == nil { context.insert(match) }
-        // A review written without the timeline never saw the gold curve or
-        // the head-to-head; let it be rewritten now that they exist.
-        if timeline != nil, existing?.goldTimeline.isEmpty == true { match.reviewText = nil }
+        let reused = existing ?? reclaimKeptMatch(id: matchID, context: context)
+        let match = reused ?? newMatch(id: matchID, game: .league)
+        if reused == nil { context.insert(match) }
+        // A review written without the timeline never saw the gold curve or head-to-head: redo it.
+        if timeline != nil, reused?.goldTimeline.isEmpty == true { match.reviewText = nil }
         populate(match, from: detail, focus: puuid, linkedPUUID: puuid, timeline: timeline, context: context)
         match.importVersion = complete ? currentDataVersion : 0
         return complete
     }
 
-    /// Keeps a browsed copy from colliding with the player's own copy of the
-    /// same game (`Match.id` is unique), and one viewer's copy from another's:
-    /// the performance card belongs to whoever's profile it was opened from.
+    /// Keeps a browsed copy from colliding with the player's own copy (`Match.id` is unique) or
+    /// another viewer's: the performance card belongs to whoever's profile it was opened from.
+    /// ponytail: the viewer's puuid changes with the daily API key, so a saved copy isn't found
+    /// after rotation and saving the fresh copy gives Saved Games two. Re-key saved copies here.
     static func browsedID(for matchID: String, viewer: String) -> String {
         "browsed:\(viewer):\(matchID)"
     }
 
-    /// Another player's game as a full `Match`, from the cache when possible,
-    /// so their profile lists games with the same rows as your own and opening
-    /// one costs nothing more.
+    /// Another player's game as a cached `Match` with the same rows as your own. It skips the
+    /// timeline call, so there's no gold chart or head-to-head.
     static func browsedMatch(
         matchID: String,
         viewedPuuid: String,
@@ -475,21 +488,7 @@ enum MatchImportService {
             return cached
         }
         let detail = try await RiotAPIClient.shared.fetchMatch(matchID: matchID, region: region)
-        return browsedMatch(detail: detail, viewedPuuid: viewedPuuid, context: context)
-    }
-
-    /// A browsable copy of another player's match, so their history opens the
-    /// same way the player's own does. It is a cache: keyed so it never
-    /// collides with real history, nobody in it is "you", and it skips the
-    /// timeline call — the gold chart and head-to-head degrade gracefully.
-    private static func browsedMatch(
-        detail: RiotMatchResponse,
-        viewedPuuid: String,
-        context: ModelContext
-    ) -> Match? {
-        let id = browsedID(for: detail.metadata.matchId, viewer: viewedPuuid)
-        var descriptor = FetchDescriptor<Match>(predicate: #Predicate { $0.id == id })
-        descriptor.fetchLimit = 1
+        // Read again: another load may have cached it during the request.
         let cached = try? context.fetch(descriptor).first
         if let cached, cached.importVersion == currentDataVersion { return cached }
 
@@ -511,12 +510,8 @@ enum MatchImportService {
         Match(id: id, game: game, win: false, queueType: "", gameDurationSeconds: 0, timestamp: .now)
     }
 
-    /// Writes everything Riot knows about one game onto `match`, replacing
-    /// whatever an earlier import put there.
-    ///
-    /// The one place a scoreboard gets built, for the player's own history and
-    /// for browsed games alike. `focus` is whose performance card this is;
-    /// `linkedPUUID` is nil for a browsed game, since nobody in it is "you".
+    /// The one place a scoreboard is built (own history and browsed games), replacing earlier rows.
+    /// `focus` is whose performance card it is; `linkedPUUID` is nil if browsing (nobody is "you").
     private static func populate(
         _ match: Match,
         from detail: RiotMatchResponse,
@@ -535,43 +530,29 @@ enum MatchImportService {
 
         if let player = info.participants.first(where: { $0.puuid == focus }) {
             match.win = player.win
-            let stats = leagueStats(for: player)
+            let stats = LeagueStats(player, role: roleName(for: player.teamPosition))
             context.insert(stats)
             match.leagueStats = stats
         }
 
         for participant in info.participants {
-            let summary = participantSummary(for: participant, isLinkedPlayer: participant.puuid == linkedPUUID)
+            let summary = MatchParticipantSummary(
+                participant,
+                role: roleName(for: participant.teamPosition),
+                isLinkedPlayer: participant.puuid == linkedPUUID
+            )
             context.insert(summary)
             summary.match = match
         }
 
         for team in info.teams {
-            let teamStats = TeamStats(
-                teamId: team.teamId,
-                win: team.win,
-                baronKills: team.objectives.baron.kills,
-                dragonKills: team.objectives.dragon.kills,
-                towerKills: team.objectives.tower.kills,
-                inhibitorKills: team.objectives.inhibitor.kills,
-                heraldKills: team.objectives.riftHerald.kills,
-                voidgrubKills: team.objectives.horde?.kills ?? 0
-            )
+            let teamStats = TeamStats(team)
             context.insert(teamStats)
             teamStats.match = match
         }
 
         if let timeline, let linkedPUUID {
-            importHeadToHead(
-                timeline: timeline,
-                participantPUUIDsInOrder: info.participants.map(\.puuid),
-                teamIDsByParticipantID: Dictionary(
-                    uniqueKeysWithValues: info.participants.enumerated().map { ($0.offset + 1, $0.element.teamId) }
-                ),
-                linkedPUUID: linkedPUUID,
-                match: match,
-                context: context
-            )
+            importHeadToHead(timeline: timeline, participants: info.participants, linkedPUUID: linkedPUUID, match: match, context: context)
         }
     }
 
@@ -588,90 +569,15 @@ enum MatchImportService {
         match.goldTimeline = []
     }
 
-    private static func leagueStats(for participant: RiotMatchResponse.Participant) -> LeagueStats {
-        LeagueStats(
-            champion: participant.championName,
-            role: roleName(for: participant.teamPosition),
-            kills: participant.kills,
-            deaths: participant.deaths,
-            assists: participant.assists,
-            creepScore: participant.totalMinionsKilled + participant.neutralMinionsKilled,
-            items: participant.items,
-            summonerSpellIDs: [participant.summoner1Id, participant.summoner2Id],
-            goldEarned: participant.goldEarned,
-            damageDealtToChampions: participant.totalDamageDealtToChampions,
-            damageTaken: participant.totalDamageTaken,
-            visionScore: participant.visionScore,
-            wardsPlaced: participant.wardsPlaced,
-            keystoneID: participant.perks.keystoneID,
-            primaryStyleID: participant.perks.primaryStyleID,
-            subStyleID: participant.perks.subStyleID,
-            doubleKills: participant.doubleKills,
-            tripleKills: participant.tripleKills,
-            quadraKills: participant.quadraKills,
-            pentaKills: participant.pentaKills,
-            turretKills: participant.turretKills ?? 0,
-            inhibitorKills: participant.inhibitorKills ?? 0,
-            dragonKills: participant.dragonKills ?? 0,
-            baronKills: participant.baronKills ?? 0,
-            objectivesStolen: participant.objectivesStolen ?? 0,
-            firstBloodKill: participant.firstBloodKill ?? false,
-            largestKillingSpree: participant.largestKillingSpree ?? 0,
-            wardsKilled: participant.wardsKilled ?? 0
-        )
-    }
-
-    private static func participantSummary(
-        for participant: RiotMatchResponse.Participant,
-        isLinkedPlayer: Bool
-    ) -> MatchParticipantSummary {
-        MatchParticipantSummary(
-            puuid: participant.puuid,
-            riotIdGameName: participant.riotIdGameName,
-            riotIdTagline: participant.riotIdTagline,
-            teamId: participant.teamId,
-            champion: participant.championName,
-            role: roleName(for: participant.teamPosition),
-            kills: participant.kills,
-            deaths: participant.deaths,
-            assists: participant.assists,
-            win: participant.win,
-            items: participant.items,
-            goldEarned: participant.goldEarned,
-            damageDealtToChampions: participant.totalDamageDealtToChampions,
-            damageTaken: participant.totalDamageTaken,
-            totalHeal: participant.totalHeal,
-            creepScore: participant.totalMinionsKilled + participant.neutralMinionsKilled,
-            visionScore: participant.visionScore,
-            wardsPlaced: participant.wardsPlaced,
-            wardsKilled: participant.wardsKilled ?? 0,
-            largestMultiKill: participant.largestMultiKill ?? 0,
-            largestKillingSpree: participant.largestKillingSpree ?? 0,
-            turretKills: participant.turretKills ?? 0,
-            summonerSpellIDs: [participant.summoner1Id, participant.summoner2Id],
-            keystoneID: participant.perks.keystoneID,
-            primaryRuneIDs: participant.perks.primaryRuneIDs,
-            secondaryRuneIDs: participant.perks.secondaryRuneIDs,
-            primaryStyleID: participant.perks.primaryStyleID,
-            subStyleID: participant.perks.subStyleID,
-            statPerkIDs: participant.perks.statPerkIDs,
-            champLevel: participant.champLevel ?? 0,
-            isLinkedPlayer: isLinkedPlayer
-        )
-    }
-
-    /// Reconstructs "who killed whom" between the linked player and each
-    /// opponent from the match timeline, plus the objective credit that only
-    /// timeline events carry.
+    /// Rebuilds per-opponent kills, deaths and assists plus objective credit from timeline events.
     private static func importHeadToHead(
         timeline: RiotMatchTimelineResponse,
-        participantPUUIDsInOrder: [String],
-        teamIDsByParticipantID: [Int: Int],
+        participants: [RiotMatchResponse.Participant],
         linkedPUUID: String,
         match: Match,
         context: ModelContext
     ) {
-        guard let linkedIndex = participantPUUIDsInOrder.firstIndex(of: linkedPUUID) else { return }
+        guard let linkedIndex = participants.firstIndex(where: { $0.puuid == linkedPUUID }) else { return }
 
         // Timeline participantIds are 1-based indices into info.participants.
         let linkedParticipantID = linkedIndex + 1
@@ -689,7 +595,6 @@ enum MatchImportService {
                 case "CHAMPION_KILL":
                     if event.killerId == linkedParticipantID, let victim = event.victimId {
                         killsOn[victim, default: 0] += 1
-                        // No assisting teammate credited means it was a 1v1.
                         if event.assistingParticipantIds?.isEmpty ?? true { soloKills += 1 }
                     }
                     // killerId 0 means an execution/turret kill with no player credited.
@@ -725,10 +630,10 @@ enum MatchImportService {
             stats.voidgrubKills = voidgrubKills
         }
 
-        for (index, opponentPUUID) in participantPUUIDsInOrder.enumerated() where opponentPUUID != linkedPUUID {
+        for (index, opponent) in participants.enumerated() where opponent.puuid != linkedPUUID {
             let participantID = index + 1
             let encounter = OpponentEncounter(
-                opponentPuuid: opponentPUUID,
+                opponentPuuid: opponent.puuid,
                 killsOnOpponent: killsOn[participantID] ?? 0,
                 deathsToOpponent: deathsTo[participantID] ?? 0,
                 assistsOnOpponent: assistsOn[participantID] ?? 0
@@ -737,24 +642,18 @@ enum MatchImportService {
             encounter.match = match
         }
 
-        importGoldCurve(
-            timeline: timeline,
-            linkedParticipantID: linkedParticipantID,
-            teamIDs: teamIDsByParticipantID,
-            match: match,
-            context: context
-        )
+        importGoldCurve(timeline: timeline, participants: participants, linkedParticipantID: linkedParticipantID, match: match, context: context)
     }
 
-    /// Turns each timeline frame's per-participant gold/XP snapshot into a
-    /// per-minute team total, which is what a gold-difference graph needs.
+    /// Sums each frame's gold/XP into per-minute ally and enemy totals for the gold graph.
     private static func importGoldCurve(
         timeline: RiotMatchTimelineResponse,
+        participants: [RiotMatchResponse.Participant],
         linkedParticipantID: Int,
-        teamIDs: [Int: Int],
         match: Match,
         context: ModelContext
     ) {
+        let teamIDs = Dictionary(uniqueKeysWithValues: participants.enumerated().map { ($0.offset + 1, $0.element.teamId) })
         guard let linkedTeamID = teamIDs[linkedParticipantID] else { return }
 
         for frame in timeline.info.frames {
@@ -794,12 +693,12 @@ enum MatchImportService {
         knownIDs: Set<String>,
         context: ModelContext
     ) async throws -> Int {
-        // Best-effort: after a League rebuild has used up the rate limit, this
-        // call is the likeliest to 429, and TFT can simply catch up next sync.
+        // Best-effort: likeliest to 429 after a League rebuild; TFT can catch up next sync.
         guard let matchIDs = try? await client.fetchRecentTFTMatchIDs(puuid: puuid, region: region, count: recentMatchCount) else { return 0 }
         var insertedCount = 0
 
         for matchID in matchIDs where !knownIDs.contains(matchID) {
+            if reclaimKeptMatch(id: matchID, context: context) != nil { continue }
             let detail: RiotTFTMatchResponse
             do {
                 detail = try await client.fetchTFTMatch(matchID: matchID, region: region)
@@ -834,12 +733,9 @@ enum MatchImportService {
 
     // MARK: - Names
 
-    /// Names taken from Riot's published queue list
-    /// (static.developer.riotgames.com/docs/lol/queues.json) rather than
-    /// guessed, so modes stop collapsing into a meaningless "Other".
+    /// From Riot's published queue list: static.developer.riotgames.com/docs/lol/queues.json
     static func queueTypeName(for queueId: Int) -> String {
         switch queueId {
-        // Summoner's Rift
         case 400: return "Normal (Draft)"
         case 420: return "Ranked Solo/Duo"
         case 430: return "Normal (Blind)"
@@ -852,11 +748,9 @@ enum MatchImportService {
         case 1020: return "One for All"
         case 1400: return "Ultimate Spellbook"
         case 2000, 2010, 2020: return "Tutorial"
-        // Howling Abyss
         case 450: return "ARAM"
         case 720: return "ARAM Clash"
         case 2400: return "ARAM: Mayhem"
-        // Other maps
         case 1300: return "Nexus Blitz"
         case 1700, 1710: return "Arena"
         case 1810, 1820, 1830, 1840: return "Swarm"

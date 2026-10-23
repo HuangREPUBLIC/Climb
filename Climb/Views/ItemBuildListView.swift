@@ -11,7 +11,6 @@ import SwiftUI
 /// and carries the item's actual name.
 struct ItemBuildListView: View {
     let items: [Int]
-    let alignment: HorizontalAlignment
 
     @State private var names: [Int: String] = [:]
     @State private var selectedItemID: Int?
@@ -23,40 +22,33 @@ struct ItemBuildListView: View {
     private var owned: [Int] { items.filter { $0 != 0 } }
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 2) {
+        VStack(alignment: .leading, spacing: 2) {
             if owned.isEmpty {
                 Text("No items")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             } else {
-                ForEach(Array(owned.enumerated()), id: \.offset) { _, item in
-                    row(item)
-                }
+                ForEach(owned.indices, id: \.self) { row(owned[$0]) }
             }
         }
-        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: owned) {
             await loadNames()
         }
     }
 
     private func row(_ itemID: Int) -> some View {
-        let trailing = alignment == .trailing
-        let icon = ItemIconView(itemID: itemID, size: iconSize, interactive: false)
-        let name = Text(names[itemID] ?? "…")
-            .font(.caption)
-            .foregroundStyle(.primary)
-            .lineLimit(2)
-            .multilineTextAlignment(trailing ? .trailing : .leading)
-            .frame(maxWidth: .infinity, alignment: trailing ? .trailing : .leading)
-
-        return Button {
+        Button {
             selectedItemID = itemID
         } label: {
             HStack(spacing: 8) {
-                if !trailing { icon }
-                name
-                if trailing { icon }
+                ItemIconView(itemID: itemID, size: iconSize, interactive: false)
+                Text(names[itemID] ?? "…")
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             // The 44pt floor is the whole reason this panel exists.
             .frame(minHeight: 44)
