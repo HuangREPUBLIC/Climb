@@ -50,6 +50,14 @@ struct SettingsView: View {
             }
 
             Section {
+                NavigationLink {
+                    AboutView()
+                } label: {
+                    Label("About Climb", systemImage: "info.circle")
+                }
+            }
+
+            Section {
                 Button(role: .destructive) {
                     confirmingLogOut = true
                 } label: {
@@ -84,5 +92,56 @@ struct SettingsView: View {
             try? await MatchImportService.logOut(context: modelContext)
             isLoggingOut = false
         }
+    }
+}
+
+/// Who made the app and where its data and art come from.
+struct AboutView: View {
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                VStack(spacing: 8) {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.largeTitle)
+                        .foregroundStyle(Theme.accent)
+                    Text("Climb")
+                        .font(.title2.bold())
+                    Text("Version \(version)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text("Review your League of Legends games, see how you rated against the lobby, and get coaching on what to fix next.")
+                        .font(.callout)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityElement(children: .combine)
+            }
+
+            Section("Developer") {
+                LabeledContent("Made by", value: "Jialin Wu")
+                LabeledContent("Unit", value: "FIT3178, Monash University")
+            }
+
+            Section("Data and Services") {
+                Link("Riot Games API: accounts, matches, ranks", destination: URL(string: "https://developer.riotgames.com")!)
+                Link("Data Dragon: champion, item and rune art", destination: URL(string: "https://developer.riotgames.com/docs/lol#data-dragon")!)
+                Link("op.gg: champion tier list and builds", destination: URL(string: "https://op.gg")!)
+                Link("Google Gemini: AI coach", destination: URL(string: "https://ai.google.dev")!)
+            }
+
+            Section {
+                Text("Climb isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games, League of Legends and Teamfight Tactics are trademarks or registered trademarks of Riot Games, Inc.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Legal")
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .screen("About")
     }
 }
